@@ -206,14 +206,14 @@ class DatabaseService {
         const { error } = await this.supabase.from('wallets').insert({ ...payload, order: maxOrder + 1 });
         if (error && error.message && error.message.includes('order')) {
             const { order, ...safePayload } = payload;
-            await this.supabase.from('wallets').insert({ ...safePayload, user_id: this.currentUser.id });
+            await this.supabase.from('wallets').insert({ ...safePayload, user_id: this.currentUser!.id });
         }
      }
   }
 
   async updateWalletsOrder(wallets: Wallet[]): Promise<void> {
      if (!this.currentUser) return;
-     const updates = wallets.map((w, index) => ({ id: w.id, user_id: this.currentUser.id, name: w.name, type: w.type, is_default: w.is_default, order: index }));
+     const updates = wallets.map((w, index) => ({ id: w.id, user_id: this.currentUser!.id, name: w.name, type: w.type, is_default: w.is_default, order: index }));
      await this.supabase.from('wallets').upsert(updates);
   }
 
@@ -252,7 +252,7 @@ class DatabaseService {
 
   async updatePaymentMethodsOrder(methods: PaymentMethod[]): Promise<void> {
       if (!this.currentUser) return;
-      const updates = methods.map((m, index) => ({ id: m.id, user_id: this.currentUser.id, name: m.name, order: index }));
+      const updates = methods.map((m, index) => ({ id: m.id, user_id: this.currentUser!.id, name: m.name, order: index }));
       await this.supabase.from('payment_methods').upsert(updates);
   }
 
@@ -904,7 +904,7 @@ class DatabaseService {
           if (!backup.data || !backup.version) return { success: false, message: 'Arquivo inválido ou corrompido.' };
           const { transactions, categories, wallets, payment_methods } = backup.data;
           const userId = this.currentUser.id;
-          const mapCategoryForDB = (c: any) => ({ id: c.id, user_id: userId, name: c.name, description: c.description, icon: c.icon, color_class: c.colorClass || c.color_class, bg_class: c.bgClass || c.bg_class, category_type: c.type || c.category_type });
+          const mapCategoryForDB = (c: any) => ({ id: c.id, user_id: userId, name: c.name, description: c.description, icon: c.icon, color_class: c.colorClass || c.color_class, bg_class: c.bg_class || c.bg_class, category_type: c.type || c.category_type });
           // Mapeamento atualizado para novos campos
           const mapTransactionForDB = (t: any) => ({ 
               id: t.id, user_id: userId, title: t.title, subtitle: t.subtitle, amount: t.amount, type: t.type, date: t.date, 

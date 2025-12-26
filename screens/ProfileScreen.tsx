@@ -326,7 +326,7 @@ const ProfileScreen: React.FC = () => {
           <SettingsItem 
             icon="credit_card" 
             title="Meu Plano" 
-            subtitle={profile?.plan === 'free' ? 'Básico (Grátis)' : `${profile?.plan.charAt(0).toUpperCase() + profile?.plan.slice(1)} (Ativo)`}
+            subtitle={(profile?.plan === 'free' || !profile?.plan) ? 'Básico (Grátis)' : `${profile.plan.charAt(0).toUpperCase() + profile.plan.slice(1)} (Ativo)`}
             onClick={() => navigate('/profile/plan')}
             iconBg="bg-yellow-100 dark:bg-yellow-500/10" 
             iconColor="text-yellow-600 dark:text-yellow-400"
