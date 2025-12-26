@@ -751,14 +751,17 @@ class DatabaseService {
 
     let isStreakActive = false;
     let streakStartIndex = -1;
-    if (uniqueDates.includes(todayStr)) { isStreakActive = true; streakStartIndex = uniqueDates.indexOf(todayStr); } 
-    else if (uniqueDates.includes(yesterdayStr)) { isStreakActive = true; streakStartIndex = uniqueDates.indexOf(yesterdayStr); }
+    // Cast to string array implicit via any but to make sure
+    const uniqueDatesStr = uniqueDates as unknown as string[];
+    
+    if (uniqueDatesStr.includes(todayStr)) { isStreakActive = true; streakStartIndex = uniqueDatesStr.indexOf(todayStr); } 
+    else if (uniqueDatesStr.includes(yesterdayStr)) { isStreakActive = true; streakStartIndex = uniqueDatesStr.indexOf(yesterdayStr); }
 
     if (isStreakActive) {
         currentStreak = 1;
         for (let i = streakStartIndex; i < uniqueDates.length - 1; i++) {
-            const currentDate = new Date(uniqueDates[i]);
-            const prevDate = new Date(uniqueDates[i+1]);
+            const currentDate = new Date(uniqueDates[i] as string);
+            const prevDate = new Date(uniqueDates[i+1] as string);
             const diffTime = Math.abs(currentDate.getTime() - prevDate.getTime());
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
             if (diffDays === 1) currentStreak++; else break;
@@ -769,8 +772,8 @@ class DatabaseService {
     let tempStreak = sortedAsc.length > 1 ? 1 : 0;
     maxStreak = tempStreak;
     for (let i = 0; i < sortedAsc.length - 1; i++) {
-        const d1 = new Date(sortedAsc[i]);
-        const d2 = new Date(sortedAsc[i+1]);
+        const d1 = new Date(sortedAsc[i] as string);
+        const d2 = new Date(sortedAsc[i+1] as string);
         const diffTime = Math.abs(d2.getTime() - d1.getTime());
         const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
         if (diffDays === 1) tempStreak++; else tempStreak = 1;
