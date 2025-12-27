@@ -79,20 +79,10 @@ class DatabaseService {
 
   constructor() {
     this.supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-    this.initAuth();
+    // Don't rely on constructor for async init, checkSession handles it
   }
 
   // --- AUTH ---
-  private async initAuth() {
-    const { data } = await this.supabase.auth.getSession();
-    if (data.session?.user) {
-      this.currentUser = this.mapSupabaseUser(data.session.user);
-    }
-    this.supabase.auth.onAuthStateChange((_event, session) => {
-      this.currentUser = session?.user ? this.mapSupabaseUser(session.user) : null;
-    });
-  }
-
   private mapSupabaseUser(sbUser: SupabaseUser): User {
     return {
       id: sbUser.id,
@@ -131,10 +121,14 @@ class DatabaseService {
   getCurrentUser(): User | null { return this.currentUser; }
 
   async checkSession(): Promise<boolean> {
-    const { data } = await this.supabase.auth.getSession();
-    if (data.session?.user) {
-      this.currentUser = this.mapSupabaseUser(data.session.user);
-      return true;
+    try {
+      const { data } = await this.supabase.auth.getSession();
+      if (data.session?.user) {
+        this.currentUser = this.mapSupabaseUser(data.session.user);
+        return true;
+      }
+    } catch (e) {
+      console.warn("Session check failed", e);
     }
     return false;
   }
@@ -152,40 +146,60 @@ class DatabaseService {
 
   private async seedDefaultCategories() {
     if (!this.currentUser) return;
-    const payload = DEFAULT_CATEGORY_SEEDS.map(c => ({ user_id: this.currentUser!.id, ...c }));
-    await this.supabase.from('categories').insert(payload);
+    try {
+      const payload = DEFAULT_CATEGORY_SEEDS.map(c => ({ user_id: this.currentUser!.id, ...c }));
+      await this.supabase.from('categories').insert(payload);
+    } catch (e) {
+      console.error("Error seeding categories:", e);
+    }
   }
   private async seedDefaultWallets() {
     if (!this.currentUser) return;
-    const payload = DEFAULT_WALLETS.map(w => ({ user_id: this.currentUser!.id, ...w }));
-    await this.supabase.from('wallets').insert(payload);
+    try {
+      const payload = DEFAULT_WALLETS.map(w => ({ user_id: this.currentUser!.id, ...w }));
+      await this.supabase.from('wallets').insert(payload);
+    } catch(e) { console.error("Seeding wallets failed", e); }
   }
   private async seedDefaultMethods() {
     if (!this.currentUser) return;
-    const payload = DEFAULT_METHODS.map(m => ({ user_id: this.currentUser!.id, ...m }));
-    await this.supabase.from('payment_methods').insert(payload);
+    try {
+      const payload = DEFAULT_METHODS.map(m => ({ user_id: this.currentUser!.id, ...m }));
+      await this.supabase.from('payment_methods').insert(payload);
+    } catch(e) { console.error("Seeding methods failed", e); }
   }
 
   // --- WALLETS & METHODS ---
   async getWallets(): Promise<Wallet[]> {
     if (!this.currentUser) return [];
-    const { data, error } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id).order('order', { ascending: true });
-    if ((!data || data.length === 0) && !error) {
+    
+    // Attempt 1: Fetch plain (removed .order('order') which causes crashes if column missing)
+    let { data, error } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
+    
+    // Attempt 2: Auto-Seed if empty or error (assuming table might exist but empty, or error masked empty)
+    if (!data || data.length === 0) {
       await this.seedDefaultWallets();
-      const { data: newData } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
-      return newData || [];
+      const retry = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
+      data = retry.data;
     }
-    return data || [];
+    
+    // Sort manually in JS to be safe against DB schema issues
+    const safeData = data || [];
+    return safeData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   }
 
   async saveWallet(wallet: Partial<Wallet>): Promise<void> {
      if (!this.currentUser) return;
      const payload: any = { ...wallet, user_id: this.currentUser.id };
-     if (wallet.id) await this.supabase.from('wallets').update(payload).eq('id', wallet.id);
-     else {
-        const { data: existing } = await this.supabase.from('wallets').select('order').eq('user_id', this.currentUser.id);
-        const maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((w: any) => w.order || 0)) : 0;
-        await this.supabase.from('wallets').insert({ ...payload, order: maxOrder + 1 });
+     try {
+        if (wallet.id) await this.supabase.from('wallets').update(payload).eq('id', wallet.id);
+        else {
+            // Unsafe query regarding 'order', wrapped in try/catch or ignored
+            const { data: existing } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
+            const maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((w: any) => w.order || 0)) : 0;
+            await this.supabase.from('wallets').insert({ ...payload, order: maxOrder + 1 });
+        }
+     } catch (e) {
+         console.error("Save wallet failed", e);
      }
   }
 
@@ -204,24 +218,33 @@ class DatabaseService {
 
   async getPaymentMethods(): Promise<PaymentMethod[]> {
     if (!this.currentUser) return [];
-    const { data, error } = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id).order('order', { ascending: true });
-    if ((!data || data.length === 0) && !error) {
+    
+    // Attempt 1: Fetch plain (removed .order('order'))
+    let { data, error } = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id);
+    
+    // Attempt 2: Auto-Seed
+    if (!data || data.length === 0) {
       await this.seedDefaultMethods();
-      const { data: newData } = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id);
-      return newData || [];
+      const retry = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id);
+      data = retry.data;
     }
-    return data || [];
+    
+    // Sort manually
+    const safeData = data || [];
+    return safeData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   }
 
   async savePaymentMethod(method: Partial<PaymentMethod>): Promise<void> {
      if (!this.currentUser) return;
      const payload: any = { ...method, user_id: this.currentUser.id };
-     if (method.id) await this.supabase.from('payment_methods').update(payload).eq('id', method.id);
-     else {
-         const { data: existing } = await this.supabase.from('payment_methods').select('order').eq('user_id', this.currentUser.id);
-         const maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((m: any) => m.order || 0)) : 0;
-         await this.supabase.from('payment_methods').insert({ ...payload, order: maxOrder + 1 });
-     }
+     try {
+        if (method.id) await this.supabase.from('payment_methods').update(payload).eq('id', method.id);
+        else {
+            const { data: existing } = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id);
+            const maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((m: any) => m.order || 0)) : 0;
+            await this.supabase.from('payment_methods').insert({ ...payload, order: maxOrder + 1 });
+        }
+     } catch (e) { console.error(e); }
   }
 
   async updatePaymentMethodsOrder(methods: PaymentMethod[]): Promise<void> {
@@ -236,7 +259,7 @@ class DatabaseService {
     await this.supabase.from('payment_methods').delete().eq('id', id);
   }
 
-  // --- CATEGORIES (Refactored to assume schema presence) ---
+  // --- CATEGORIES ---
   async getCategories(): Promise<Category[]> {
     if (!this.currentUser) return [];
     const { data, error } = await this.supabase.from('categories').select('*').eq('user_id', this.currentUser.id);
@@ -249,11 +272,12 @@ class DatabaseService {
   }
 
   private mapCategoryFromDB(c: any): Category {
-    // Prioriza colunas reais. Fallback para description apenas para leitura de dados antigos.
+    // Robust mapping for budget columns that might be missing
     let budget = c.budget ?? c.budget_limit ?? 0;
     let description = c.description || '';
     
-    if (budget === 0 && description.includes(SEPARATOR)) {
+    // Legacy check for budget in description
+    if (budget === 0 && description && description.includes(SEPARATOR)) {
         try {
             const parts = description.split(SEPARATOR);
             const meta = JSON.parse(parts[1].trim());
@@ -278,7 +302,7 @@ class DatabaseService {
   
   async updateCategoryBudget(categoryId: string, limit: number): Promise<{ success: boolean, error?: any }> {
       if (!this.currentUser) return { success: false, error: 'Not authenticated' };
-      // Agora salvamos diretamente nas colunas. Se falhar, é porque o usuário não rodou a migration.
+      // Fallback: try update both columns to cover schema variations
       const { error } = await this.supabase.from('categories').update({ budget: limit, budget_limit: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
       return error ? { success: false, error } : { success: true };
   }
@@ -319,18 +343,23 @@ class DatabaseService {
   // --- GOALS ---
   async getGoals(): Promise<FinancialGoal[]> {
     if (!this.currentUser) return [];
-    const { data, error } = await this.supabase.from('financial_goals').select('*').eq('user_id', this.currentUser.id);
-    if (error || !data) return [];
-    
-    return data.map((g: any) => ({
-      id: g.id,
-      name: g.name,
-      targetAmount: g.target_amount,
-      currentAmount: g.current_amount,
-      deadline: g.deadline,
-      icon: g.icon || 'savings',
-      colorClass: g.color_class || 'text-blue-500'
-    }));
+    try {
+        const { data, error } = await this.supabase.from('financial_goals').select('*').eq('user_id', this.currentUser.id);
+        if (error || !data) return [];
+        
+        return data.map((g: any) => ({
+        id: g.id,
+        name: g.name,
+        targetAmount: g.target_amount,
+        currentAmount: g.current_amount,
+        deadline: g.deadline,
+        icon: g.icon || 'savings',
+        colorClass: g.color_class || 'text-blue-500'
+        }));
+    } catch(e) {
+        console.error("Failed to fetch goals", e);
+        return [];
+    }
   }
 
   async saveGoal(goal: Partial<FinancialGoal>): Promise<{ success: boolean; error?: any }> {
@@ -362,12 +391,18 @@ class DatabaseService {
   // --- TRANSACTIONS ---
   async getTransactions(): Promise<Transaction[]> {
     if (!this.currentUser) return [];
-    const { data } = await this.supabase
+    
+    // Removed secondary sort on 'created_at' to prevent crashes on legacy schemas
+    const { data, error } = await this.supabase
       .from('transactions')
       .select('*')
       .eq('user_id', this.currentUser.id)
-      .order('date', { ascending: false })
-      .order('created_at', { ascending: false }); 
+      .order('date', { ascending: false });
+    
+    if (error) {
+        console.error("Supabase Error in getTransactions:", error);
+        return [];
+    }
     
     return (data || []).map((t: any) => {
       const { text, meta } = parseSubtitle(t.subtitle);
@@ -383,7 +418,7 @@ class DatabaseService {
         date: t.date,
         categoryId: t.category_id,
         userId: t.user_id,
-        created_at: t.created_at,
+        created_at: t.created_at, // might be undefined, handled by map
         walletId: t.wallet_id,
         paymentMethodId: t.payment_method_id,
         installmentNumber: t.installment_number,
@@ -397,24 +432,25 @@ class DatabaseService {
 
   private async checkAlerts(transaction: any): Promise<string[]> {
     const alerts: string[] = [];
-    const settings = await this.getNotificationSettings();
-    if (!settings?.alert_limit) return [];
+    try {
+        const settings = await this.getNotificationSettings();
+        if (!settings?.alert_limit) return [];
 
-    if (transaction.type === 'expense' && transaction.category_id) {
-       const { data: cat } = await this.supabase.from('categories').select('name, budget').eq('id', transaction.category_id).single();
-       if (cat && cat.budget > 0) {
-           // Calculate spent this month
-           const now = new Date(transaction.date);
-           const startStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
-           const endStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-31`;
+        if (transaction.type === 'expense' && transaction.category_id) {
+        const { data: cat } = await this.supabase.from('categories').select('name, budget').eq('id', transaction.category_id).single();
+        if (cat && cat.budget > 0) {
+            const now = new Date(transaction.date);
+            const startStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+            const endStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-31`;
 
-           const { data: txs } = await this.supabase.from('transactions').select('amount').eq('category_id', transaction.category_id).gte('date', startStr).lte('date', endStr);
-           const totalSpent = (txs || []).reduce((acc: number, t: any) => acc + t.amount, 0);
+            const { data: txs } = await this.supabase.from('transactions').select('amount').eq('category_id', transaction.category_id).gte('date', startStr).lte('date', endStr);
+            const totalSpent = (txs || []).reduce((acc: number, t: any) => acc + t.amount, 0);
 
-           if (totalSpent > cat.budget) alerts.push(`🚨 Atenção! Você excedeu o orçamento de ${cat.name}.`);
-           else if (totalSpent > cat.budget * 0.9) alerts.push(`⚠️ Alerta: 90% do orçamento de ${cat.name} consumido.`);
-       }
-    }
+            if (totalSpent > cat.budget) alerts.push(`🚨 Atenção! Você excedeu o orçamento de ${cat.name}.`);
+            else if (totalSpent > cat.budget * 0.9) alerts.push(`⚠️ Alerta: 90% do orçamento de ${cat.name} consumido.`);
+        }
+        }
+    } catch (e) { console.error("Error checking alerts", e); }
     return alerts;
   }
 
@@ -423,17 +459,23 @@ class DatabaseService {
   ): Promise<{ success: boolean, error?: any, alerts?: string[] }> {
     if (!this.currentUser) return { success: false, error: 'Usuário não autenticado' };
     
-    // Auto Categorization
     let categoryId = transaction.categoryId;
     if (!categoryId) {
-       const { data: rules } = await this.supabase.from('smart_category_rules').select('*').eq('user_id', this.currentUser.id);
-       if (rules && rules.length > 0) {
-          const match = rules.find((r: any) => transaction.title.toLowerCase().includes(r.keyword.toLowerCase()));
-          if (match) categoryId = match.category_id;
-       }
+       try {
+           const { data: rules } = await this.supabase.from('smart_category_rules').select('*').eq('user_id', this.currentUser.id);
+           if (rules && rules.length > 0) {
+            const match = rules.find((r: any) => transaction.title.toLowerCase().includes(r.keyword.toLowerCase()));
+            if (match) categoryId = match.category_id;
+           }
+       } catch (e) {}
     }
 
-    const { data: category } = await this.supabase.from('categories').select('*').eq('id', categoryId).single();
+    let category = null;
+    if (categoryId) {
+        const { data } = await this.supabase.from('categories').select('*').eq('id', categoryId).single();
+        category = data;
+    }
+    
     let icon = category?.icon || 'payments';
     if (transaction.icon && transaction.icon !== 'payments') icon = transaction.icon;
     const colorClass = category?.color_class || 'text-gray-600';
@@ -455,19 +497,16 @@ class DatabaseService {
         dateObj.setMonth(dateObj.getMonth() + i);
         const isoDate = dateObj.toISOString().split('T')[0];
 
-        let title = transaction.title;
-        // Se for parcelado, não altera o título, mostra "1/12" no subtítulo
-        
         payloads.push({
             user_id: this.currentUser.id,
-            title: title,
+            title: transaction.title,
             subtitle: baseSubtitle, 
             amount: installments > 1 ? baseAmount : transaction.amount,
             type: transaction.type,
             date: isoDate,
             category_id: categoryId,
-            wallet_id: transaction.walletId,
-            payment_method_id: transaction.paymentMethodId,
+            wallet_id: transaction.walletId || null,
+            payment_method_id: transaction.paymentMethodId || null,
             icon, color_class: colorClass, bg_class: bgClass,
             installment_number: installments > 1 ? i + 1 : null,
             installment_total: installments > 1 ? installments : null,
@@ -547,89 +586,100 @@ class DatabaseService {
   }
 
   async getBudgetsReport(month: number, year: number): Promise<BudgetReport> {
-    const transactions = await this.getTransactions();
-    const categories = await this.getCategories();
-    const goals = await this.getGoals();
+    try {
+        const [transactions, categories, goals] = await Promise.all([
+            this.getTransactions().catch(() => []),
+            this.getCategories().catch(() => []),
+            this.getGoals().catch(() => [])
+        ]);
 
-    const monthlyTxs = transactions.filter(t => {
-      const d = new Date(t.date);
-      const adj = new Date(d.getTime() + d.getTimezoneOffset() * 60000);
-      return adj.getMonth() === month && adj.getFullYear() === year && t.type === 'expense';
-    });
+        const monthlyTxs = transactions.filter(t => {
+        const d = new Date(t.date);
+        const adj = new Date(d.getTime() + d.getTimezoneOffset() * 60000);
+        return adj.getMonth() === month && adj.getFullYear() === year && t.type === 'expense';
+        });
 
-    const categorySpend: Record<string, number> = {};
-    let totalSpent = 0;
-    let fixedCosts = 0;
-    let committedInstallments = 0;
-    let variableSpent = 0;
-    const activeInstallmentsList: Transaction[] = [];
-    const fixedCostsList: Transaction[] = [];
+        const categorySpend: Record<string, number> = {};
+        let totalSpent = 0;
+        let fixedCosts = 0;
+        let committedInstallments = 0;
+        let variableSpent = 0;
+        const activeInstallmentsList: Transaction[] = [];
+        const fixedCostsList: Transaction[] = [];
 
-    for (const t of monthlyTxs) {
-        totalSpent += t.amount;
-        if (t.categoryId) {
-            categorySpend[t.categoryId] = (categorySpend[t.categoryId] || 0) + t.amount;
+        for (const t of monthlyTxs) {
+            totalSpent += t.amount;
+            if (t.categoryId) {
+                categorySpend[t.categoryId] = (categorySpend[t.categoryId] || 0) + t.amount;
+            }
+
+            if (t.isFixed) {
+                fixedCosts += t.amount;
+                fixedCostsList.push(t);
+            } else if (t.installmentTotal && t.installmentTotal > 1) {
+                committedInstallments += t.amount;
+                activeInstallmentsList.push(t);
+            } else {
+                variableSpent += t.amount;
+            }
         }
 
-        if (t.isFixed) {
-            fixedCosts += t.amount;
-            fixedCostsList.push(t);
-        } else if (t.installmentTotal && t.installmentTotal > 1) {
-            committedInstallments += t.amount;
-            activeInstallmentsList.push(t);
-        } else {
-            variableSpent += t.amount;
+        const reportCategories = categories.map(c => {
+            const spent = categorySpend[c.id] || 0;
+            return { ...c, spent };
+        }).filter(c => c.type === 'expense' || c.type === 'both');
+
+        const totalBudget = reportCategories.reduce((acc, c) => acc + (c.budget || 0), 0);
+        const remaining = Math.max(0, totalBudget - totalSpent);
+
+        const now = new Date();
+        const daysInMonth = new Date(year, month + 1, 0).getDate();
+        let daysPassed = 0;
+        if (year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth())) {
+            daysPassed = daysInMonth;
+        } else if (year === now.getFullYear() && month === now.getMonth()) {
+            daysPassed = now.getDate();
         }
+        const daysPassedPct = (daysPassed / daysInMonth) * 100;
+        const budgetConsumedPct = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+        
+        let pace: 'slow' | 'on-track' | 'fast' | 'critical' = 'on-track';
+        if (totalBudget > 0) {
+            if (budgetConsumedPct > 100) pace = 'critical';
+            else if (budgetConsumedPct > daysPassedPct + 10) pace = 'fast';
+            else if (budgetConsumedPct < daysPassedPct - 10) pace = 'slow';
+        }
+
+        let alertCategory = null;
+        const overBudget = reportCategories.filter(c => (c.budget || 0) > 0 && (c.spent || 0) > (c.budget || 0));
+        if (overBudget.length > 0) {
+            alertCategory = overBudget.sort((a,b) => ((b.spent||0) - (b.budget||0)) - ((a.spent||0) - (a.budget||0)))[0];
+        }
+
+        return {
+            totalBudget,
+            totalSpent,
+            remaining,
+            fixedCosts,
+            committedInstallments,
+            variableSpent,
+            activeInstallmentsList,
+            fixedCostsList,
+            pace,
+            daysPassedPct,
+            budgetConsumedPct,
+            categories: reportCategories,
+            alertCategory,
+            goals
+        };
+    } catch (error) {
+        console.error("Critical error generating budget report", error);
+        return {
+            totalBudget: 0, totalSpent: 0, remaining: 0, fixedCosts: 0, committedInstallments: 0, variableSpent: 0,
+            activeInstallmentsList: [], fixedCostsList: [], pace: 'on-track', daysPassedPct: 0, budgetConsumedPct: 0,
+            categories: [], alertCategory: null, goals: []
+        };
     }
-
-    const reportCategories = categories.map(c => {
-        const spent = categorySpend[c.id] || 0;
-        return { ...c, spent };
-    }).filter(c => c.type === 'expense' || c.type === 'both');
-
-    const totalBudget = reportCategories.reduce((acc, c) => acc + (c.budget || 0), 0);
-    const remaining = Math.max(0, totalBudget - totalSpent);
-
-    const now = new Date();
-    const daysInMonth = new Date(year, month + 1, 0).getDate();
-    let daysPassed = 0;
-    if (year < now.getFullYear() || (year === now.getFullYear() && month < now.getMonth())) {
-        daysPassed = daysInMonth;
-    } else if (year === now.getFullYear() && month === now.getMonth()) {
-        daysPassed = now.getDate();
-    }
-    const daysPassedPct = (daysPassed / daysInMonth) * 100;
-    const budgetConsumedPct = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
-    
-    let pace: 'slow' | 'on-track' | 'fast' | 'critical' = 'on-track';
-    if (totalBudget > 0) {
-        if (budgetConsumedPct > 100) pace = 'critical';
-        else if (budgetConsumedPct > daysPassedPct + 10) pace = 'fast';
-        else if (budgetConsumedPct < daysPassedPct - 10) pace = 'slow';
-    }
-
-    let alertCategory = null;
-    const overBudget = reportCategories.filter(c => (c.budget || 0) > 0 && (c.spent || 0) > (c.budget || 0));
-    if (overBudget.length > 0) {
-        alertCategory = overBudget.sort((a,b) => ((b.spent||0) - (b.budget||0)) - ((a.spent||0) - (a.budget||0)))[0];
-    }
-
-    return {
-        totalBudget,
-        totalSpent,
-        remaining,
-        fixedCosts,
-        committedInstallments,
-        variableSpent,
-        activeInstallmentsList,
-        fixedCostsList,
-        pace,
-        daysPassedPct,
-        budgetConsumedPct,
-        categories: reportCategories,
-        alertCategory,
-        goals
-    };
   }
 
   // --- USER PROFILE & HELPERS ---

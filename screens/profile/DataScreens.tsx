@@ -309,7 +309,7 @@ export const DataScreen: React.FC = () => {
                 </button>
             </div>
             <p className="text-xs text-yellow-800 dark:text-yellow-200/80 mb-2">
-                Se os orçamentos não estiverem salvando, você precisa adicionar colunas ao banco de dados.
+                Se os dados aparecerem zerados ou com erro, execute este script no Supabase para garantir que as tabelas existem.
             </p>
             
             {showSql && (
@@ -318,12 +318,60 @@ export const DataScreen: React.FC = () => {
                         Copie o código abaixo e execute no <strong>SQL Editor</strong> do seu painel Supabase:
                     </p>
                     <div className="bg-slate-800 p-3 rounded-lg overflow-x-auto">
-                        <code className="text-[10px] font-mono text-green-400 block whitespace-pre">
-{`ALTER TABLE categories 
-ADD COLUMN IF NOT EXISTS budget NUMERIC DEFAULT 0;
+                        <code className="text-[10px] font-mono text-green-400 block whitespace-pre select-all">
+{`-- 1. Create Wallets Table
+create table if not exists wallets (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references auth.users not null,
+  name text not null,
+  type text default 'account',
+  is_default boolean default false,
+  "order" integer default 0,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
 
-ALTER TABLE categories 
-ADD COLUMN IF NOT EXISTS budget_limit NUMERIC DEFAULT 0;`}
+-- 2. Create Payment Methods Table
+create table if not exists payment_methods (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references auth.users not null,
+  name text not null,
+  "order" integer default 0,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 3. Create Goals Table
+create table if not exists financial_goals (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references auth.users not null,
+  name text not null,
+  target_amount numeric default 0,
+  current_amount numeric default 0,
+  deadline date,
+  icon text,
+  color_class text,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);
+
+-- 4. Add Columns to Transactions
+alter table transactions add column if not exists wallet_id uuid references wallets(id);
+alter table transactions add column if not exists payment_method_id uuid references payment_methods(id);
+alter table transactions add column if not exists installment_number integer;
+alter table transactions add column if not exists installment_total integer;
+alter table transactions add column if not exists installment_group_id uuid;
+alter table transactions add column if not exists is_fixed boolean default false;
+
+-- 5. Add Columns to Categories
+alter table categories add column if not exists budget numeric default 0;
+alter table categories add column if not exists budget_limit numeric default 0;
+
+-- 6. Create Smart Rules
+create table if not exists smart_category_rules (
+  id uuid default uuid_generate_v4() primary key,
+  user_id uuid references auth.users not null,
+  keyword text not null,
+  category_id uuid references categories(id) not null,
+  created_at timestamp with time zone default timezone('utc'::text, now())
+);`}
                         </code>
                     </div>
                 </div>
