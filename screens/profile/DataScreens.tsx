@@ -9,6 +9,9 @@ export const DataScreen: React.FC = () => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [status, setStatus] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [showExportOptions, setShowExportOptions] = useState(false);
+  
+  // SQL Migration State
+  const [showSql, setShowSql] = useState(false);
 
   useEffect(() => {
     db.getUserProfile().then(setProfile);
@@ -195,8 +198,6 @@ export const DataScreen: React.FC = () => {
       setImporting(false);
       if (result.success) {
         setStatus({ type: 'success', msg: result.message || 'Importação concluída!' });
-        // CORREÇÃO CRÍTICA: Não usar reload(), pois quebra o app em mobile/webview.
-        // Usamos navigate para recarregar o estado via React Router.
         setTimeout(() => {
            if (e.target) e.target.value = ''; // Limpa o input para permitir re-upload se necessário
            navigate('/dashboard');
@@ -295,6 +296,40 @@ export const DataScreen: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* --- DATABASE FIX TOOL --- */}
+        <div className="bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-xl border border-yellow-200 dark:border-yellow-900/30">
+            <div className="flex items-center justify-between mb-2">
+                <h3 className="font-bold text-yellow-700 dark:text-yellow-500 flex items-center gap-2">
+                    <span className="material-symbols-outlined">construction</span>
+                    Reparo do Banco
+                </h3>
+                <button onClick={() => setShowSql(!showSql)} className="text-xs font-bold uppercase text-yellow-600 dark:text-yellow-400 hover:underline">
+                    {showSql ? 'Ocultar' : 'Mostrar Instruções'}
+                </button>
+            </div>
+            <p className="text-xs text-yellow-800 dark:text-yellow-200/80 mb-2">
+                Se os orçamentos não estiverem salvando, você precisa adicionar colunas ao banco de dados.
+            </p>
+            
+            {showSql && (
+                <div className="mt-2">
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">
+                        Copie o código abaixo e execute no <strong>SQL Editor</strong> do seu painel Supabase:
+                    </p>
+                    <div className="bg-slate-800 p-3 rounded-lg overflow-x-auto">
+                        <code className="text-[10px] font-mono text-green-400 block whitespace-pre">
+{`ALTER TABLE categories 
+ADD COLUMN IF NOT EXISTS budget NUMERIC DEFAULT 0;
+
+ALTER TABLE categories 
+ADD COLUMN IF NOT EXISTS budget_limit NUMERIC DEFAULT 0;`}
+                        </code>
+                    </div>
+                </div>
+            )}
+        </div>
+
       </main>
 
       {/* Action Sheet for Rich Export */}

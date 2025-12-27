@@ -17,11 +17,11 @@ import { DataScreen } from './screens/profile/DataScreens';
 import NotificationScreen from './screens/profile/NotificationScreen';
 import WalletsScreen from './screens/WalletsScreen';
 import MethodsScreen from './screens/MethodsScreen';
-// New Screen
 import ShortcutsScreen from './screens/ShortcutsScreen';
 
 import { db } from './services/database';
 import { ThemeProvider } from './components/ThemeHandler';
+import { DataProvider } from './contexts/DataContext';
 
 // Suppress specific Recharts warning
 const originalWarn = console.warn;
@@ -62,44 +62,46 @@ const App: React.FC = () => {
 
   return (
     <ThemeProvider>
-      <HashRouter>
-        {/* Global Desktop/Tablet Wrapper - Centers the App */}
-        <div className="flex justify-center min-h-screen bg-[#e0e5ec] dark:bg-[#050505] transition-colors duration-300">
-          
-          {/* Mobile App Shell */}
-          <div className="w-full max-w-lg min-h-screen bg-background-light dark:bg-background-dark shadow-2xl relative overflow-hidden flex flex-col font-display">
-            <Routes>
-              <Route path="/" element={<WelcomeScreen />} />
-              <Route path="/login" element={<LoginScreen />} />
-              
-              {/* Protected Routes */}
-              <Route path="/dashboard" element={<ProtectedRoute><DashboardScreen /></ProtectedRoute>} />
-              <Route path="/add" element={<ProtectedRoute><AddTransactionScreen /></ProtectedRoute>} />
-              <Route path="/shortcuts" element={<ProtectedRoute><ShortcutsScreen /></ProtectedRoute>} />
-              <Route path="/statement" element={<ProtectedRoute><StatementScreen /></ProtectedRoute>} />
-              <Route path="/budgets" element={<ProtectedRoute><BudgetsScreen /></ProtectedRoute>} />
-              <Route path="/categories" element={<ProtectedRoute><CategoriesScreen /></ProtectedRoute>} />
-              <Route path="/wallets" element={<ProtectedRoute><WalletsScreen /></ProtectedRoute>} />
-              <Route path="/methods" element={<ProtectedRoute><MethodsScreen /></ProtectedRoute>} />
-              
-              {/* Profile & Settings Routes */}
-              <Route path="/profile" element={<ProtectedRoute><ProfileScreen /></ProtectedRoute>} />
-              <Route path="/profile/plan" element={<ProtectedRoute><PlanManagementScreen /></ProtectedRoute>} />
-              <Route path="/profile/security" element={<ProtectedRoute><SecurityScreen /></ProtectedRoute>} />
-              <Route path="/profile/2fa" element={<ProtectedRoute><TwoFactorScreen /></ProtectedRoute>} />
-              <Route path="/profile/email" element={<ProtectedRoute><ChangeEmailScreen /></ProtectedRoute>} />
-              <Route path="/profile/delete-account" element={<ProtectedRoute><DeleteAccountScreen /></ProtectedRoute>} />
-              <Route path="/profile/data" element={<ProtectedRoute><DataScreen /></ProtectedRoute>} />
-              <Route path="/profile/notifications" element={<ProtectedRoute><NotificationScreen /></ProtectedRoute>} />
-              <Route path="/profile/appearance" element={<ProtectedRoute><AppearanceScreen /></ProtectedRoute>} />
-              <Route path="/profile/smart-rules" element={<ProtectedRoute><SmartRulesScreen /></ProtectedRoute>} />
-              <Route path="/profile/about" element={<ProtectedRoute><AboutScreen /></ProtectedRoute>} />
-              
-              <Route path="*" element={<Navigate to="/" replace />} />
-            </Routes>
+      <DataProvider>
+        <HashRouter>
+          {/* Global Desktop/Tablet Wrapper - Centers the App */}
+          <div className="flex justify-center min-h-screen bg-[#e0e5ec] dark:bg-[#050505] transition-colors duration-300">
+            
+            {/* Mobile App Shell */}
+            <div className="w-full max-w-lg min-h-screen bg-background-light dark:bg-background-dark shadow-2xl relative overflow-hidden flex flex-col font-display">
+              <Routes>
+                <Route path="/" element={<WelcomeScreen />} />
+                <Route path="/login" element={<LoginScreen />} />
+                
+                {/* Protected Routes */}
+                <Route path="/dashboard" element={<ProtectedRoute><DashboardScreen /></ProtectedRoute>} />
+                <Route path="/add" element={<ProtectedRoute><AddTransactionScreen /></ProtectedRoute>} />
+                <Route path="/shortcuts" element={<ProtectedRoute><ShortcutsScreen /></ProtectedRoute>} />
+                <Route path="/statement" element={<ProtectedRoute><StatementScreen /></ProtectedRoute>} />
+                <Route path="/budgets" element={<ProtectedRoute><BudgetsScreen /></ProtectedRoute>} />
+                <Route path="/categories" element={<ProtectedRoute><CategoriesScreen /></ProtectedRoute>} />
+                <Route path="/wallets" element={<ProtectedRoute><WalletsScreen /></ProtectedRoute>} />
+                <Route path="/methods" element={<ProtectedRoute><MethodsScreen /></ProtectedRoute>} />
+                
+                {/* Profile & Settings Routes */}
+                <Route path="/profile" element={<ProtectedRoute><ProfileScreen /></ProtectedRoute>} />
+                <Route path="/profile/plan" element={<ProtectedRoute><PlanManagementScreen /></ProtectedRoute>} />
+                <Route path="/profile/security" element={<ProtectedRoute><SecurityScreen /></ProtectedRoute>} />
+                <Route path="/profile/2fa" element={<ProtectedRoute><TwoFactorScreen /></ProtectedRoute>} />
+                <Route path="/profile/email" element={<ProtectedRoute><ChangeEmailScreen /></ProtectedRoute>} />
+                <Route path="/profile/delete-account" element={<ProtectedRoute><DeleteAccountScreen /></ProtectedRoute>} />
+                <Route path="/profile/data" element={<ProtectedRoute><DataScreen /></ProtectedRoute>} />
+                <Route path="/profile/notifications" element={<ProtectedRoute><NotificationScreen /></ProtectedRoute>} />
+                <Route path="/profile/appearance" element={<ProtectedRoute><AppearanceScreen /></ProtectedRoute>} />
+                <Route path="/profile/smart-rules" element={<ProtectedRoute><SmartRulesScreen /></ProtectedRoute>} />
+                <Route path="/profile/about" element={<ProtectedRoute><AboutScreen /></ProtectedRoute>} />
+                
+                <Route path="*" element={<Navigate to="/" replace />} />
+              </Routes>
+            </div>
           </div>
-        </div>
-      </HashRouter>
+        </HashRouter>
+      </DataProvider>
     </ThemeProvider>
   );
 };

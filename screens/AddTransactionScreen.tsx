@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { db } from '../services/database';
+import { useData } from '../contexts/DataContext';
 import { Category, Wallet, PaymentMethod } from '../types';
 
 interface TransactionDraft {
@@ -26,6 +26,9 @@ const AddTransactionScreen: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const state = location.state as TransactionDraft | null;
+  
+  // Use Context Data
+  const { categories, wallets, methods, addTransaction } = useData();
   
   // Core State
   const [type, setType] = useState<'income' | 'expense' | 'transfer'>(() => state?.type || 'income');
@@ -54,42 +57,27 @@ const AddTransactionScreen: React.FC = () => {
   const [destinationWalletId, setDestinationWalletId] = useState(() => state?.destinationWalletId || '');
   const [methodId, setMethodId] = useState(() => state?.methodId || '');
   
-  // Data
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [methods, setMethods] = useState<PaymentMethod[]>([]);
-  
   // UI
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isLoadingData, setIsLoadingData] = useState(true);
   const [saveError, setSaveError] = useState('');
 
+  // Initial Logic
   useEffect(() => {
-    const init = async () => {
-      setIsLoadingData(true);
-      const [cats, wals, mets] = await Promise.all([db.getCategories(), db.getWallets(), db.getPaymentMethods()]);
-      setCategories(cats);
-      setWallets(wals);
-      setMethods(mets);
-
-      if (wals.length > 0 && !walletId) {
-          const defaultWallet = wals.find(w => w.is_default) || wals[0];
+      if (wallets.length > 0 && !walletId) {
+          const defaultWallet = wallets.find(w => w.is_default) || wallets[0];
           setWalletId(defaultWallet.id);
       }
-      if (mets.length > 0 && !methodId) {
-         const defaultMethod = mets.find(m => m.name.toLowerCase().includes('débito')) || mets[0];
+      if (methods.length > 0 && !methodId) {
+         const defaultMethod = methods.find(m => m.name.toLowerCase().includes('débito')) || methods[0];
          setMethodId(defaultMethod.id);
       }
       if (state?.createdCategoryId) {
          setCategoryId(state.createdCategoryId);
-         const createdCat = cats.find(c => c.id === state.createdCategoryId);
+         const createdCat = categories.find(c => c.id === state.createdCategoryId);
          if (createdCat && createdCat.type !== 'both') setType(createdCat.type as any);
       }
       if (state?.type === 'transfer' && !description) setDescription('Transferência');
-      setIsLoadingData(false);
-    };
-    init();
-  }, []);
+  }, [wallets, methods, categories]);
 
   // Effect para recalcular parcelas
   useEffect(() => {
@@ -117,7 +105,6 @@ const AddTransactionScreen: React.FC = () => {
   };
 
   const handleTotalInterestChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    // Se for smart calc, o total é calculado, não editado diretamente (a menos que desligue o smart)
     if (isSmartCalc) return; 
     let value = e.target.value.replace(/\D/g, "");
     if (value === "") { setTotalWithInterest(""); return; }
@@ -129,7 +116,7 @@ const AddTransactionScreen: React.FC = () => {
       if ("Notification" in window && Notification.permission === "granted") {
           new Notification("FinControl Alerta", { body: message, icon: '/vite.svg' });
       } else {
-          alert(message);
+          // Toast or simple alert logic handled by calling code if needed
       }
   };
 
@@ -140,34 +127,22 @@ const AddTransactionScreen: React.FC = () => {
     setIsSubmitting(true);
     setSaveError('');
 
-    // Se tiver juros, o valor final a ser parcelado é o totalWithInterest (o amount vira a parcela).
-    // MAS a lógica do addTransaction espera o TOTAL da transação no campo amount se for parcelado.
-    // Se for calculado automaticamente (parcela fixa), o total é calculatedInstallment * installments.
-    
     let cleanAmount = 0;
     let financingData = undefined;
 
     if (isSmartCalc && hasInterest && calculatedInstallment > 0) {
-        // Modo Financiamento Inteligente: Amount = Valor da Parcela
-        cleanAmount = calculatedInstallment; // A função database vai multiplicar isso? NÃO.
-        // A função database: "const baseAmount = transaction.amount / installments;" SE não for financiamento.
-        // Se for financiamento, o amount passado deve ser o valor DA PARCELA.
-        // Vamos ajustar a função addTransaction no database para aceitar financingDetails e não dividir o amount se já for parcela.
-        
+        cleanAmount = calculatedInstallment;
         financingData = {
             interestRate: parseFloat(monthlyInterestRate.replace(',', '.')),
             loanAmount: parseFloat(amount.replace(/\./g, '').replace(',', '.')),
             totalInterest: (calculatedInstallment * installments) - parseFloat(amount.replace(/\./g, '').replace(',', '.'))
         };
     } else if (hasInterest && totalWithInterest) {
-        // Modo Manual com Juros: O usuário digitou o total final.
         cleanAmount = parseFloat(totalWithInterest.replace(/\./g, '').replace(',', '.'));
     } else {
-        // Normal
         cleanAmount = parseFloat(amount.replace(/\./g, '').replace(',', '.'));
     }
     
-    // Icon logic based on type
     let customIcon = undefined;
     if (installments > 1 && !isFixed) {
         if (installmentType === 'car') customIcon = 'directions_car';
@@ -181,19 +156,20 @@ const AddTransactionScreen: React.FC = () => {
             const walletDestName = wallets.find(w => w.id === destinationWalletId)?.name || 'Conta';
             const walletOriginName = wallets.find(w => w.id === walletId)?.name || 'Conta';
             
-            await db.addTransaction({
+            // Add via Context
+            await addTransaction({
                 title: description, subtitle: `Para: ${walletDestName}`, amount: cleanAmount, type: 'expense',
                 date, categoryId: '', walletId: walletId, paymentMethodId: methodId,
                 isFixed: false, installments: 1
             });
-            result = await db.addTransaction({
+            result = await addTransaction({
                 title: description, subtitle: `De: ${walletOriginName}`, amount: cleanAmount, type: 'income',
                 date, categoryId: '', walletId: destinationWalletId, paymentMethodId: methodId,
                 isFixed: false, installments: 1
             });
         } else {
             const walletOriginName = wallets.find(w => w.id === walletId)?.name || 'Conta';
-            result = await db.addTransaction({
+            result = await addTransaction({
                 title: description,
                 subtitle: isFixed ? 'Conta Fixa Mensal' : installments > 1 ? `Parcelado em ${installments}x` : walletOriginName,
                 amount: cleanAmount,
@@ -220,7 +196,6 @@ const AddTransactionScreen: React.FC = () => {
 
   const filteredCategories = categories.filter(c => c.type === type || c.type === 'both');
 
-  // Calculation display for Normal/Manual Mode
   const finalTotalManual = hasInterest && totalWithInterest && !isSmartCalc 
       ? parseFloat(totalWithInterest.replace(/\./g, '').replace(',', '.')) 
       : parseFloat(amount.replace(/\./g, '').replace(',', '.') || '0');
@@ -256,7 +231,6 @@ const AddTransactionScreen: React.FC = () => {
             <input autoFocus type="text" inputMode="numeric" placeholder="0,00" value={amount} onChange={handleAmountChange} className={`bg-transparent border-none text-center p-0 text-5xl font-extrabold focus:ring-0 w-full max-w-[280px] ${type === 'income' ? 'text-green-500 placeholder:text-green-500/30' : type === 'transfer' ? 'text-blue-500 placeholder:text-blue-500/30' : 'text-slate-900 dark:text-white placeholder:text-slate-300 dark:placeholder:text-slate-700'}`} />
           </div>
           
-          {/* Display Installment Value Logic */}
           {installments > 1 && amount && (
              <span className="text-xs text-primary font-bold mt-2 bg-primary/10 px-2 py-1 rounded animate-[fade-in_0.3s]">
                 {installments}x de R$ {(isSmartCalc ? calculatedInstallment : installmentValueManual).toLocaleString('pt-BR', {minimumFractionDigits: 2, maximumFractionDigits: 2})}
@@ -347,8 +321,7 @@ const AddTransactionScreen: React.FC = () => {
           )}
         </div>
 
-        {/* --- Advanced Options (Recurring & Installments) --- */}
-        {/* Mostrado APENAS para Despesas */}
+        {/* --- Advanced Options --- */}
         {type === 'expense' && (
             <div className="bg-white dark:bg-[#1A2231] rounded-2xl p-4 shadow-sm border border-slate-100 dark:border-transparent">
                 <button onClick={() => setShowAdvanced(!showAdvanced)} className="flex items-center justify-between w-full text-sm font-bold text-slate-500 hover:text-primary transition-colors">
@@ -358,12 +331,10 @@ const AddTransactionScreen: React.FC = () => {
                 
                 {showAdvanced && (
                     <div className="mt-4 flex flex-col gap-4 animate-[fade-in_0.3s]">
-                        
-                        {/* Toggle Fixed */}
                         <div className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-[#232f48]">
                             <div className="flex flex-col">
                                 <span className="text-sm font-bold dark:text-white">Conta Fixa Mensal</span>
-                                <span className="text-[10px] text-slate-400">Repetir todo mês (ex: Netflix, Aluguel)</span>
+                                <span className="text-[10px] text-slate-400">Repetir todo mês</span>
                             </div>
                             <button 
                                 onClick={() => { setIsFixed(!isFixed); if(!isFixed) { setInstallments(1); setHasInterest(false); setIsSmartCalc(false); } }} 
@@ -373,10 +344,8 @@ const AddTransactionScreen: React.FC = () => {
                             </button>
                         </div>
 
-                        {/* --- INSTALLMENTS SECTION --- */}
                         {!isFixed && (
                             <div className="flex flex-col gap-4 border-t border-slate-100 dark:border-slate-800 pt-3">
-                                {/* Type Selector */}
                                 <div>
                                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Tipo de Parcelamento</label>
                                     <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
@@ -385,14 +354,7 @@ const AddTransactionScreen: React.FC = () => {
                                                 key={t.id} 
                                                 onClick={() => {
                                                     setInstallmentType(t.id);
-                                                    // Ativa cálculo inteligente se for Casa/Carro/Emp
-                                                    if(t.id !== 'card') {
-                                                        setIsSmartCalc(true);
-                                                        setHasInterest(true);
-                                                    } else {
-                                                        setIsSmartCalc(false);
-                                                        setHasInterest(false);
-                                                    }
+                                                    if(t.id !== 'card') { setIsSmartCalc(true); setHasInterest(true); } else { setIsSmartCalc(false); setHasInterest(false); }
                                                 }}
                                                 className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${installmentType === t.id ? 'bg-primary text-white border-primary' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'}`}
                                             >
@@ -403,51 +365,28 @@ const AddTransactionScreen: React.FC = () => {
                                     </div>
                                 </div>
 
-                                {/* Installment Count (Input Number) */}
                                 <div>
-                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Quantidade de Parcelas (Meses)</label>
+                                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 block">Quantidade de Parcelas</label>
                                     <div className="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 rounded-xl p-1 relative">
                                         <div className="flex-1">
-                                            <input 
-                                                type="number" 
-                                                min="1" max="420" 
-                                                value={installments} 
-                                                onChange={e => {
-                                                    const val = parseInt(e.target.value);
-                                                    setInstallments(isNaN(val) || val < 1 ? 1 : val);
-                                                }}
-                                                className="w-full bg-transparent border-none text-center font-bold text-lg dark:text-white p-2 focus:ring-0"
-                                            />
+                                            <input type="number" min="1" max="420" value={installments} onChange={e => { const val = parseInt(e.target.value); setInstallments(isNaN(val) || val < 1 ? 1 : val); }} className="w-full bg-transparent border-none text-center font-bold text-lg dark:text-white p-2 focus:ring-0" />
                                         </div>
                                         <div className="flex gap-1 pr-1">
-                                            {[12, 24, 48, 60].map(n => (
-                                                <button key={n} onClick={() => setInstallments(n)} className="w-8 h-8 rounded-lg bg-white dark:bg-[#1A2231] text-xs font-bold text-slate-500 shadow-sm hover:text-primary">
-                                                    {n}
-                                                </button>
-                                            ))}
+                                            {[12, 24, 48, 60].map(n => <button key={n} onClick={() => setInstallments(n)} className="w-8 h-8 rounded-lg bg-white dark:bg-[#1A2231] text-xs font-bold text-slate-500 shadow-sm hover:text-primary">{n}</button>)}
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* Smart Calculation Fields (Financing) */}
                                 {isSmartCalc && (
                                     <div className="animate-[fade-in_0.3s] p-3 bg-blue-50 dark:bg-blue-900/10 rounded-xl border border-blue-100 dark:border-blue-900/30">
                                         <div className="flex items-center gap-2 mb-3">
                                             <span className="material-symbols-outlined text-blue-500">calculate</span>
                                             <span className="text-xs font-bold text-blue-600 dark:text-blue-300 uppercase">Calculadora Inteligente</span>
                                         </div>
-                                        
                                         <div className="grid grid-cols-2 gap-3 mb-3">
                                             <div>
                                                 <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Taxa Juros (% a.m.)</label>
-                                                <input 
-                                                    type="text" 
-                                                    inputMode="decimal"
-                                                    placeholder="Ex: 1,5" 
-                                                    value={monthlyInterestRate}
-                                                    onChange={e => setMonthlyInterestRate(e.target.value)}
-                                                    className="w-full p-2 rounded-lg bg-white dark:bg-slate-800 border-none text-center font-bold dark:text-white shadow-sm focus:ring-1 focus:ring-blue-500"
-                                                />
+                                                <input type="text" inputMode="decimal" placeholder="Ex: 1,5" value={monthlyInterestRate} onChange={e => setMonthlyInterestRate(e.target.value)} className="w-full p-2 rounded-lg bg-white dark:bg-slate-800 border-none text-center font-bold dark:text-white shadow-sm focus:ring-1 focus:ring-blue-500" />
                                             </div>
                                             <div>
                                                 <label className="text-[10px] font-bold text-slate-500 uppercase mb-1 block">Valor Parcela</label>
@@ -456,48 +395,27 @@ const AddTransactionScreen: React.FC = () => {
                                                 </div>
                                             </div>
                                         </div>
-                                        <p className="text-[9px] text-blue-400 text-center">Cálculo estimado via Tabela Price. Ajuste os valores se necessário.</p>
                                     </div>
                                 )}
 
-                                {/* Interest Toggle & Input (Legacy/Manual Mode) */}
                                 <div className="flex flex-col gap-2">
                                     <div className="flex items-center justify-between">
-                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                                            {isSmartCalc ? 'Valor Total Final (Calculado)' : 'Tem Juros?'}
-                                        </label>
+                                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">{isSmartCalc ? 'Valor Total Final (Calculado)' : 'Tem Juros?'}</label>
                                         {!isSmartCalc && (
-                                            <button 
-                                                onClick={() => setHasInterest(!hasInterest)} 
-                                                className={`w-9 h-5 rounded-full relative transition-colors ${hasInterest ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}
-                                            >
+                                            <button onClick={() => setHasInterest(!hasInterest)} className={`w-9 h-5 rounded-full relative transition-colors ${hasInterest ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}>
                                                 <div className={`absolute top-1 left-1 w-3 h-3 bg-white rounded-full transition-transform ${hasInterest ? 'translate-x-4' : ''}`}></div>
                                             </button>
                                         )}
                                     </div>
-                                    
                                     {hasInterest && (
                                         <div className="animate-[fade-in_0.3s]">
                                             <div className={`flex items-center gap-2 rounded-xl p-3 border-2 ${isSmartCalc ? 'bg-blue-50 dark:bg-slate-800 border-blue-200 dark:border-blue-900/30' : 'bg-slate-100 dark:bg-slate-800 border-primary/20'}`}>
                                                 <span className="text-xs font-bold text-slate-500 uppercase">Valor Final:</span>
                                                 <div className="flex-1 flex items-center gap-1">
                                                     <span className="text-sm font-bold text-primary">R$</span>
-                                                    <input 
-                                                        type="text" 
-                                                        inputMode="numeric" 
-                                                        placeholder="0,00" 
-                                                        value={totalWithInterest} 
-                                                        onChange={handleTotalInterestChange} 
-                                                        readOnly={isSmartCalc} // Read only in smart mode
-                                                        className={`w-full bg-transparent border-none p-0 text-lg font-bold text-slate-900 dark:text-white focus:ring-0 ${isSmartCalc ? 'opacity-80' : ''}`} 
-                                                    />
+                                                    <input type="text" inputMode="numeric" placeholder="0,00" value={totalWithInterest} onChange={handleTotalInterestChange} readOnly={isSmartCalc} className={`w-full bg-transparent border-none p-0 text-lg font-bold text-slate-900 dark:text-white focus:ring-0 ${isSmartCalc ? 'opacity-80' : ''}`} />
                                                 </div>
                                             </div>
-                                            {!isSmartCalc && (
-                                                <p className="text-[10px] text-slate-400 mt-1">
-                                                    Digite o valor total final com os juros inclusos. A parcela será recalculada.
-                                                </p>
-                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -510,7 +428,7 @@ const AddTransactionScreen: React.FC = () => {
 
         <button 
           onClick={handleSave} 
-          disabled={isSubmitting || isLoadingData}
+          disabled={isSubmitting}
           className={`w-full py-4 rounded-xl shadow-lg font-bold text-white flex items-center justify-center gap-2 transition-all active:scale-[0.98] mt-auto ${type === 'income' ? 'bg-green-600 shadow-green-600/30' : type === 'transfer' ? 'bg-blue-600 shadow-blue-600/30' : 'bg-red-500 shadow-red-500/30'}`}
         >
           {isSubmitting ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <><span className="material-symbols-outlined">check</span> Confirmar</>}

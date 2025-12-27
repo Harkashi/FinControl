@@ -1,9 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 import BottomNav from '../components/BottomNav';
 import { db } from '../services/database';
-import { Transaction, DashboardMetrics, MonthlyInsight } from '../types';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useData } from '../contexts/DataContext';
+import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../components/ThemeHandler';
 
 // --- COMPONENTS ---
@@ -38,7 +38,6 @@ const ShortcutModal: React.FC<{ isOpen: boolean; onClose: () => void; shortcuts:
   if (!isOpen) return null;
   return (
     <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm animate-[fade-in_0.2s]" onClick={onClose}>
-      {/* Adicionado pb-[env(safe-area-inset-bottom)] para não colar na barra inferior do iPhone */}
       <div className="w-full sm:max-w-sm bg-white dark:bg-[#1e2330] rounded-t-2xl sm:rounded-2xl p-5 pb-[calc(1.5rem+env(safe-area-inset-bottom))] sm:p-6 animate-[slide-up_0.3s] shadow-2xl border-t border-white/10" onClick={e => e.stopPropagation()}>
          <div className="flex justify-between items-center mb-5">
             <h3 className="text-lg font-bold dark:text-white flex items-center gap-2">
@@ -103,19 +102,12 @@ const DEFAULT_AVATAR = "https://lh3.googleusercontent.com/aida-public/AB6AXuCJhI
 
 const DashboardScreen: React.FC = () => {
   const navigate = useNavigate();
-  const location = useLocation();
-  const { privacyMode, setPrivacyMode, chartStyle } = useTheme();
+  const { privacyMode, chartStyle } = useTheme();
+  // USE CONTEXT
+  const { dashboardMetrics: metrics, monthlyInsights: insights, transactions, loading, refreshData } = useData();
   
-  // State
-  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
-  const [insights, setInsights] = useState<MonthlyInsight | null>(null);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [monthlyChartData, setMonthlyChartData] = useState<any[]>([]);
   const [userName, setUserName] = useState('Usuário');
   const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
-  
-  const [loading, setLoading] = useState(true);
-  const [dbError, setDbError] = useState(false);
   const [isShortcutOpen, setIsShortcutOpen] = useState(false);
   
   // Helpers
@@ -132,41 +124,38 @@ const DashboardScreen: React.FC = () => {
     return `há ${Math.floor(diff/86400)}d`;
   };
 
+  // Compute Chart Data Locally from Transactions in Context
+  const monthlyChartData = useMemo(() => {
+      const now = new Date();
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const daysArray = Array.from({ length: daysInMonth }, (_, i) => { return { name: (i + 1).toString(), income: 0, expense: 0 }; });
+      
+      transactions.forEach(t => {
+          const tDate = new Date(t.date);
+          const adjustedDate = new Date(tDate.getTime() + tDate.getTimezoneOffset() * 60000);
+          if (adjustedDate.getMonth() === now.getMonth() && adjustedDate.getFullYear() === now.getFullYear()) {
+              const dayIndex = adjustedDate.getDate() - 1;
+              if (daysArray[dayIndex]) {
+                  if (t.type === 'income') daysArray[dayIndex].income += t.amount;
+                  else daysArray[dayIndex].expense += t.amount;
+              }
+          }
+      });
+      return daysArray;
+  }, [transactions]);
+
+  // Recent transactions (Top 3 relevant)
+  const recentTransactions = useMemo(() => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      return transactions.filter(t => t.date <= todayStr).slice(0, 3);
+  }, [transactions]);
+
   useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      setDbError(false);
-      try {
-        const user = db.getCurrentUser();
-        if (user) setUserName(user.name.split(' ')[0]);
-        
-        // Load Avatar
-        const savedAvatar = localStorage.getItem('fincontrol_user_avatar');
-        if (savedAvatar) setAvatarUrl(savedAvatar);
-
-        // Centralized Data Fetching
-        const data = await db.getDashboardMetrics();
-        const chartData = await db.getMonthlyData();
-        const recentTxs = await db.getTransactions();
-        
-        // Filter Future Transactions for "Recent List"
-        const todayStr = new Date().toISOString().split('T')[0];
-        const filteredRecent = recentTxs.filter(t => t.date <= todayStr);
-
-        setMetrics(data.metrics);
-        setInsights(data.insights);
-        setMonthlyChartData(chartData);
-        setTransactions(filteredRecent.slice(0, 3)); // Top 3 relevant
-
-      } catch (e) {
-        console.error("Dashboard Load Error", e);
-        setDbError(true);
-      } finally {
-        setLoading(false);
-      }
-    };
-    loadData();
-  }, [location]);
+    const user = db.getCurrentUser();
+    if (user) setUserName(user.name.split(' ')[0]);
+    const savedAvatar = localStorage.getItem('fincontrol_user_avatar');
+    if (savedAvatar) setAvatarUrl(savedAvatar);
+  }, []);
 
   const isMinimal = chartStyle === 'minimal';
 
@@ -193,21 +182,21 @@ const DashboardScreen: React.FC = () => {
               <h2 className="text-white text-lg font-bold leading-tight truncate">{userName}</h2>
             </div>
           </div>
-          <button 
-             onClick={() => setPrivacyMode(!privacyMode)}
-             className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-[#192233] text-white hover:bg-[#232f48] transition-colors active:scale-95"
-          >
-            <span className="material-symbols-outlined">{privacyMode ? 'visibility_off' : 'visibility'}</span>
-          </button>
-        </div>
-
-        {/* Error Banner */}
-        {dbError && (
-          <div className="mx-4 mt-2 bg-red-500/10 border border-red-500/20 p-3 rounded-xl flex items-center gap-3 animate-[fade-in_0.3s]">
-             <span className="material-symbols-outlined text-red-500">warning</span>
-             <p className="text-xs text-red-200">Erro de conexão. Verifique o Supabase.</p>
+          <div className="flex gap-2">
+            <button 
+                onClick={refreshData}
+                className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-[#192233] text-white hover:bg-[#232f48] transition-colors active:scale-95"
+            >
+                <span className={`material-symbols-outlined ${loading ? 'animate-spin' : ''}`}>refresh</span>
+            </button>
+            <button 
+                onClick={() => navigate('/profile')} // Quick toggle or navigate? Let's keep privacy toggle
+                className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-[#192233] text-white hover:bg-[#232f48] transition-colors active:scale-95"
+            >
+                <span className="material-symbols-outlined">settings</span>
+            </button>
           </div>
-        )}
+        </div>
 
         {/* --- PREMIUM BALANCE CARD --- */}
         <div className="px-4 py-4">
@@ -412,8 +401,8 @@ const DashboardScreen: React.FC = () => {
              <h3 className="text-white text-lg font-bold leading-tight tracking-[-0.015em]">Recentes</h3>
           </div>
           <div className="flex flex-col gap-[1px]">
-             {!loading && transactions.length > 0 ? transactions.map((t, index) => (
-               <div key={t.id} className={`flex items-center justify-between px-4 py-4 bg-[#192233] mx-4 hover:bg-[#202b40] transition-colors cursor-pointer group ${index === 0 ? 'rounded-t-xl' : ''} ${index === transactions.length -1 ? 'rounded-b-xl' : ''}`}>
+             {!loading && recentTransactions.length > 0 ? recentTransactions.map((t, index) => (
+               <div key={t.id} className={`flex items-center justify-between px-4 py-4 bg-[#192233] mx-4 hover:bg-[#202b40] transition-colors cursor-pointer group ${index === 0 ? 'rounded-t-xl' : ''} ${index === recentTransactions.length -1 ? 'rounded-b-xl' : ''}`}>
                  <div className="flex items-center gap-4 overflow-hidden flex-1 min-w-0">
                    <div className={`w-11 h-11 rounded-full shrink-0 flex items-center justify-center transition-colors ${t.bgClass} ${t.colorClass}`}>
                      <span className="material-symbols-outlined text-[22px]">{t.icon}</span>
