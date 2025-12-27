@@ -292,6 +292,11 @@ class DatabaseService {
       await this.supabase.from('categories').update({ budget_limit: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
   }
 
+  async resetAllCategoryBudgets(): Promise<void> {
+      if (!this.currentUser) return;
+      await this.supabase.from('categories').update({ budget_limit: 0 }).eq('user_id', this.currentUser.id);
+  }
+
   async saveCategory(category: Category): Promise<{success: boolean, error?: any}> {
     if (!this.currentUser) return { success: false, error: 'Not authenticated' };
     const payload = {
@@ -372,17 +377,18 @@ class DatabaseService {
     const categories = await this.getCategories();
     const goals = await this.getGoals(); // Fetch goals
 
-    const startDate = new Date(year, month, 1).toISOString();
-    const endDate = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+    // FIX: Using YYYY-MM-DD strings for date range to match DB text column accurately
+    const startStr = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+    const lastDay = new Date(year, month + 1, 0).getDate();
+    const endStr = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`;
 
-    // RESTAURADO: seleção de 'id' e 'subtitle' para garantir funcionamento correto
     const { data: transactions } = await this.supabase
       .from('transactions')
       .select('id, title, subtitle, amount, category_id, type, is_fixed, installment_number, installment_total, icon, color_class, bg_class') 
       .eq('user_id', this.currentUser.id)
       .eq('type', 'expense') 
-      .gte('date', startDate)
-      .lte('date', endDate);
+      .gte('date', startStr) // >= YYYY-MM-01
+      .lte('date', endStr);  // <= YYYY-MM-DD
 
     let totalBudget = 0;
     let totalSpent = 0;
@@ -662,6 +668,8 @@ class DatabaseService {
     const txs = await this.getTransactions(); // Uses updated parser
     const categories = await this.getCategories();
     const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
+    
     let balance = 0, income = 0, expense = 0, lastMonthIncome = 0, lastMonthExpense = 0, yearIncome = 0, yearExpense = 0;
     let biggestExpenseTx: Transaction | null = null;
     let lastTx: Transaction | null = null;
@@ -671,8 +679,13 @@ class DatabaseService {
     txs.forEach((t, index) => {
         const tDate = new Date(t.date);
         const adjustedDate = new Date(tDate.getTime() + tDate.getTimezoneOffset() * 60000);
-        if (t.type === 'income') balance += t.amount; else balance -= t.amount;
-        if (index === 0) lastTx = t;
+        
+        // Balance Calculation: Only count up to today
+        if (t.date <= todayStr) {
+            if (t.type === 'income') balance += t.amount; else balance -= t.amount;
+        }
+
+        // Logic for current month
         if (adjustedDate.getMonth() === now.getMonth() && adjustedDate.getFullYear() === now.getFullYear()) {
             if (t.type === 'income') income += t.amount;
             else {
@@ -681,9 +694,13 @@ class DatabaseService {
                 if (!biggestExpenseTx || t.amount > biggestExpenseTx.amount) biggestExpenseTx = t;
             }
         }
+        
+        // Logic for last month
         if (adjustedDate.getMonth() === (now.getMonth() - 1) && adjustedDate.getFullYear() === now.getFullYear()) {
              if (t.type === 'income') lastMonthIncome += t.amount; else lastMonthExpense += t.amount;
         }
+        
+        // Logic for current year stats
         if (adjustedDate.getFullYear() === now.getFullYear()) {
             if (t.type === 'income') yearIncome += t.amount; else {
                 yearExpense += t.amount;
@@ -693,6 +710,9 @@ class DatabaseService {
             }
         }
     });
+    
+    // Find actual Last Transaction (that is <= Today)
+    lastTx = txs.find(t => t.date <= todayStr) || null;
 
     const monthVariationIncome = lastMonthIncome === 0 ? 0 : ((income - lastMonthIncome) / lastMonthIncome) * 100;
     const monthVariationExpense = lastMonthExpense === 0 ? 0 : ((expense - lastMonthExpense) / lastMonthExpense) * 100;
@@ -929,7 +949,19 @@ class DatabaseService {
       }
   }
 
-  async getBalance(): Promise<{ total: number, income: number, expense: number }> { const txs = await this.getTransactions(); let i = 0, e = 0; txs.forEach(t => t.type === 'income' ? i += t.amount : e += t.amount); return { total: i - e, income: i, expense: e }; }
+  async getBalance(): Promise<{ total: number, income: number, expense: number }> { 
+      const txs = await this.getTransactions(); 
+      const today = new Date().toISOString().split('T')[0];
+      let i = 0, e = 0; 
+      
+      txs.forEach(t => {
+          if (t.date <= today) {
+              if (t.type === 'income') i += t.amount; else e += t.amount; 
+          }
+      });
+      
+      return { total: i - e, income: i, expense: e }; 
+  }
   
   async getMonthlyData(): Promise<any[]> {
     if (!this.currentUser) return [];

@@ -6,7 +6,7 @@ import { db } from '../services/database';
 import { Transaction, Category, Wallet, PaymentMethod } from '../types';
 import { useTheme } from '../components/ThemeHandler';
 
-type FilterType = 'all' | 'month' | 'income' | 'expense';
+type FilterType = 'all' | 'month' | 'income' | 'expense' | 'future';
 
 const StatementScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -22,7 +22,7 @@ const StatementScreen: React.FC = () => {
   const [balance, setBalance] = useState(0);
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
+  const [activeFilter, setActiveFilter] = useState<FilterType>('all'); // "all" now means "History (<= Today)"
   const [isMounted, setIsMounted] = useState(false);
   const [userName, setUserName] = useState('Cliente');
   const [userEmail, setUserEmail] = useState('');
@@ -42,7 +42,7 @@ const StatementScreen: React.FC = () => {
         ]);
         
         setTransactions(txs);
-        setFilteredTransactions(txs);
+        // Initial filter logic handled by useEffect on activeFilter
         setBalance(bal.total);
         setCategories(cats);
         setWallets(wals);
@@ -68,7 +68,12 @@ const StatementScreen: React.FC = () => {
 
   const processChartData = (data: Transaction[]) => {
     if (data.length > 0) {
-      const sorted = [...data].sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      const todayStr = new Date().toISOString().split('T')[0];
+      // Sort Ascending for Balance Calculation
+      const sorted = [...data]
+        .filter(t => t.date <= todayStr) // Only chart history
+        .sort((a,b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+      
       let currentBal = 0; 
       const chartPoints = sorted.map(t => {
         const val = t.type === 'income' ? t.amount : -t.amount;
@@ -79,33 +84,44 @@ const StatementScreen: React.FC = () => {
           balance: currentBal 
         };
       });
-      setChartData(chartPoints.slice(-20));
+      // Take last 30 points to show recent trend
+      setChartData(chartPoints.slice(-30));
     } else {
-      setChartData([{ date: '', amount: 0 }]);
+      setChartData([{ date: '', amount: 0, balance: 0 }]);
     }
   };
 
   const filterData = (filter: FilterType) => {
     let filtered = [...transactions];
     const now = new Date();
+    const todayStr = now.toISOString().split('T')[0];
 
-    switch (filter) {
-      case 'month':
+    // Basic logic: 'all', 'income', 'expense' show HISTORY only (<= Today)
+    // 'future' shows FUTURE (> Today)
+    // 'month' shows CURRENT MONTH (can include future if in same month)
+
+    if (filter === 'future') {
+        filtered = filtered.filter(t => t.date > todayStr);
+    } else if (filter === 'month') {
         filtered = filtered.filter(t => {
           const tDate = new Date(t.date);
           const adjustedDate = new Date(tDate.getTime() + tDate.getTimezoneOffset() * 60000);
           return adjustedDate.getMonth() === now.getMonth() && adjustedDate.getFullYear() === now.getFullYear();
         });
-        break;
-      case 'income':
-        filtered = filtered.filter(t => t.type === 'income');
-        break;
-      case 'expense':
-        filtered = filtered.filter(t => t.type === 'expense');
-        break;
-      default:
-        break;
+    } else {
+        // For All, Income, Expense -> Filter out future by default
+        filtered = filtered.filter(t => t.date <= todayStr);
+        
+        if (filter === 'income') {
+            filtered = filtered.filter(t => t.type === 'income');
+        } else if (filter === 'expense') {
+            filtered = filtered.filter(t => t.type === 'expense');
+        }
     }
+    
+    // Ensure Descending Sort (Newest first)
+    filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    
     setFilteredTransactions(filtered);
   };
 
@@ -435,7 +451,7 @@ const StatementScreen: React.FC = () => {
         {/* Summary Chart Section */}
         <div className="px-4 py-6">
           <div className="flex flex-col gap-2">
-            <p className="text-text-secondary text-sm font-medium uppercase tracking-wider">Saldo Total</p>
+            <p className="text-text-secondary text-sm font-medium uppercase tracking-wider">Saldo Total (Hoje)</p>
             <div className="flex items-baseline gap-2">
               <p className="text-3xl font-bold tracking-tight">{formatValue(balance)}</p>
             </div>
@@ -455,10 +471,11 @@ const StatementScreen: React.FC = () => {
                       contentStyle={{backgroundColor: '#192233', border: 'none', borderRadius: '8px', fontSize: '12px'}} 
                       itemStyle={{color: '#fff'}}
                       labelStyle={{display: 'none'}}
+                      formatter={(val: number) => [`R$ ${val.toLocaleString('pt-BR', {minimumFractionDigits: 2})}`, 'Saldo']}
                     />
                     <Area 
                       type="monotone" 
-                      dataKey="amount" 
+                      dataKey="balance" 
                       stroke="rgb(var(--color-primary))" 
                       strokeWidth={3} 
                       fillOpacity={1} 
@@ -485,10 +502,18 @@ const StatementScreen: React.FC = () => {
               onClick={() => setActiveFilter('all')}
               className={`flex h-9 shrink-0 items-center justify-center gap-x-2 rounded-full pl-4 pr-3 shadow-sm transition-all active:scale-95 ${activeFilter === 'all' ? 'bg-primary text-white shadow-primary/20' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-text-secondary'}`}
             >
-              <p className="text-sm font-bold">Tudo</p>
+              <p className="text-sm font-bold">Histórico</p>
               {activeFilter === 'all' && <span className="material-symbols-outlined text-[18px]">check</span>}
             </button>
             
+            <button 
+              onClick={() => setActiveFilter('future')}
+              className={`flex h-9 shrink-0 items-center justify-center gap-x-2 rounded-full pl-4 pr-3 shadow-sm transition-all active:scale-95 ${activeFilter === 'future' ? 'bg-indigo-500 text-white shadow-indigo-500/20' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-text-secondary'}`}
+            >
+              <p className="text-sm font-bold">Futuro</p>
+              {activeFilter === 'future' && <span className="material-symbols-outlined text-[18px]">event_upcoming</span>}
+            </button>
+
             <button 
               onClick={() => setActiveFilter('month')}
               className={`flex h-9 shrink-0 items-center justify-center gap-x-2 rounded-full pl-4 pr-3 shadow-sm transition-all active:scale-95 ${activeFilter === 'month' ? 'bg-primary text-white shadow-primary/20' : 'bg-white dark:bg-surface-dark border border-gray-200 dark:border-gray-700 text-text-secondary'}`}
@@ -521,7 +546,7 @@ const StatementScreen: React.FC = () => {
             <div className="flex flex-col gap-2">
               <div className="px-4 flex justify-between items-end">
                 <h3 className="text-text-secondary text-sm font-bold uppercase tracking-wide">
-                  {activeFilter === 'all' ? 'Todas' : activeFilter === 'month' ? 'Este Mês' : activeFilter === 'income' ? 'Receitas' : 'Despesas'}
+                  {activeFilter === 'all' ? 'Histórico Completo' : activeFilter === 'future' ? 'Lançamentos Futuros' : activeFilter === 'month' ? 'Este Mês' : activeFilter === 'income' ? 'Receitas' : 'Despesas'}
                 </h3>
                 <span className="text-xs text-text-secondary">{filteredTransactions.length} itens</span>
               </div>
@@ -552,7 +577,10 @@ const StatementScreen: React.FC = () => {
           ) : (
              <div className="flex flex-col items-center justify-center py-12 opacity-50">
                 <span className="material-symbols-outlined text-4xl mb-2">filter_list_off</span>
-                <p className="text-sm font-medium">Nenhuma transação encontrada para este filtro.</p>
+                <p className="text-sm font-medium">Nenhum lançamento encontrado.</p>
+                {activeFilter === 'all' && (
+                    <p className="text-xs text-text-secondary mt-2">Verifique o filtro "Futuro" para agendamentos.</p>
+                )}
              </div>
           )}
           <div className="h-8"></div>

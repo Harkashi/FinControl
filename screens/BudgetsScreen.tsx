@@ -3,6 +3,7 @@ import BottomNav from '../components/BottomNav';
 import { useTheme } from '../components/ThemeHandler';
 import { db } from '../services/database';
 import { BudgetReport, Category, FinancialGoal, Transaction } from '../types';
+import { useNavigate } from 'react-router-dom';
 
 const COLORS = [
   { id: 'blue', text: 'text-blue-500', bg: 'bg-blue-500/20', ring: 'ring-blue-500' },
@@ -29,15 +30,21 @@ const parseCurrency = (value: string) => {
 };
 
 const BudgetsScreen: React.FC = () => {
+  const navigate = useNavigate();
   const { privacyMode } = useTheme();
   const [loading, setLoading] = useState(true);
   const [report, setReport] = useState<BudgetReport | null>(null);
   const [currentDate, setCurrentDate] = useState(new Date());
   const [activeTab, setActiveTab] = useState<'variable' | 'committed' | 'goals'>('variable');
   
+  // Settings Menu State
+  const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
+  const [showResetModal, setShowResetModal] = useState(false);
+
   // Edit Budget Modal
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [newLimit, setNewLimit] = useState('');
+  const [isSavingBudget, setIsSavingBudget] = useState(false);
 
   // Goals Logic
   const [goalModalOpen, setGoalModalOpen] = useState(false);
@@ -83,11 +90,35 @@ const BudgetsScreen: React.FC = () => {
 
   const handleSaveBudget = async () => {
     if (!editingCategory) return;
-    const limit = parseFloat(newLimit.replace(',', '.'));
-    if (isNaN(limit)) return;
+    setIsSavingBudget(true);
+    
+    // Parse correto usando a função helper
+    const limit = parseCurrency(newLimit);
+    
+    // Mesmo que seja 0, permitimos para "remover" o limite
     await db.updateCategoryBudget(editingCategory.id, limit);
+    
     setEditingCategory(null);
-    loadData();
+    setIsSavingBudget(false);
+    await loadData(); // Recarrega os dados para atualizar a UI
+  };
+
+  // --- SETTINGS MENU ACTIONS ---
+  const handleManageCategories = () => {
+      setSettingsMenuOpen(false);
+      navigate('/categories');
+  };
+
+  const handleResetBudgetsClick = () => {
+      setSettingsMenuOpen(false);
+      setShowResetModal(true);
+  };
+
+  const confirmResetBudgets = async () => {
+      setShowResetModal(false);
+      setLoading(true);
+      await db.resetAllCategoryBudgets();
+      await loadData();
   };
 
   // --- GOAL ACTIONS ---
@@ -199,16 +230,16 @@ const BudgetsScreen: React.FC = () => {
   // --- VISUAL COMPONENTS ---
   const PaceIndicator = ({ pace }: { pace: BudgetReport['pace'] }) => {
       const config = {
-          'slow': { color: 'bg-green-500', text: 'Economizando', icon: 'thumb_up' },
-          'on-track': { color: 'bg-blue-500', text: 'No Ritmo', icon: 'check' },
-          'fast': { color: 'bg-yellow-500', text: 'Acelerado', icon: 'speed' },
-          'critical': { color: 'bg-red-500', text: 'Crítico', icon: 'warning' },
+          'slow': { color: 'bg-green-500', text: 'ECONOMIA', icon: 'thumb_up' },
+          'on-track': { color: 'bg-blue-600', text: 'NO RITMO', icon: 'check' },
+          'fast': { color: 'bg-yellow-500', text: 'ACELERADO', icon: 'speed' },
+          'critical': { color: 'bg-red-500', text: 'CRÍTICO', icon: 'warning' },
       }[pace];
 
       return (
-          <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-full backdrop-blur-md border border-white/10">
-              <span className={`w-2 h-2 rounded-full ${config.color} animate-pulse`}></span>
-              <span className="text-xs font-bold text-white uppercase tracking-wide">{config.text}</span>
+          <div className="flex items-center gap-2 bg-[#1e293b] px-3 py-1.5 rounded-full border border-slate-700 shadow-sm">
+              <span className={`w-2 h-2 rounded-full ${config.color}`}></span>
+              <span className="text-[10px] font-bold text-white uppercase tracking-wider">{config.text}</span>
           </div>
       );
   };
@@ -218,15 +249,20 @@ const BudgetsScreen: React.FC = () => {
       {/* Header */}
       <header className="bg-background-light dark:bg-background-dark pt-safe">
         <div className="flex items-center justify-between px-4 py-4">
-          <div className="flex flex-col">
-             <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Planejamento</span>
-             <div className="flex items-center gap-2 mt-0.5">
-                <button onClick={() => handleMonthChange('prev')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_left</span></button>
-                <span className="font-extrabold text-lg capitalize">{monthName}</span>
-                <button onClick={() => handleMonthChange('next')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_right</span></button>
-             </div>
+          <div className="flex items-center gap-3">
+            <button onClick={() => navigate('/dashboard')} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/10 transition-colors -ml-2">
+               <span className="material-symbols-outlined dark:text-white">arrow_back</span>
+            </button>
+            <div className="flex flex-col">
+               <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Planejamento</span>
+               <div className="flex items-center gap-2 mt-0.5">
+                  <button onClick={() => handleMonthChange('prev')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_left</span></button>
+                  <span className="font-extrabold text-lg capitalize">{monthName}</span>
+                  <button onClick={() => handleMonthChange('next')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_right</span></button>
+               </div>
+            </div>
           </div>
-          <button className="w-10 h-10 rounded-full bg-slate-100 dark:bg-[#192233] flex items-center justify-center">
+          <button onClick={() => setSettingsMenuOpen(true)} className="w-10 h-10 rounded-full bg-slate-100 dark:bg-[#192233] flex items-center justify-center hover:bg-slate-200 dark:hover:bg-[#232f48] transition-colors">
              <span className="material-symbols-outlined">settings</span>
           </button>
         </div>
@@ -245,8 +281,8 @@ const BudgetsScreen: React.FC = () => {
                 <div className="relative z-10 flex flex-col gap-4">
                     <div className="flex justify-between items-start">
                         <div>
-                            <p className="text-slate-400 text-xs font-bold uppercase tracking-wider mb-1">Saldo Livre Real</p>
-                            <h1 className="text-3xl font-extrabold tracking-tight">{formatCurrency(report?.remaining || 0)}</h1>
+                            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">SALDO LIVRE REAL</p>
+                            <h1 className="text-4xl font-extrabold tracking-tight">{formatCurrency(report?.remaining || 0)}</h1>
                         </div>
                         {report && <PaceIndicator pace={report.pace} />}
                     </div>
@@ -256,7 +292,7 @@ const BudgetsScreen: React.FC = () => {
                         <div className="absolute h-full bg-primary rounded-full transition-all duration-1000" style={{ width: `${Math.min(100, report?.budgetConsumedPct || 0)}%` }}></div>
                         <div className="absolute top-0 bottom-0 w-0.5 bg-white z-10 opacity-70" style={{ left: `${report?.daysPassedPct}%` }} title="Hoje"></div>
                     </div>
-                    <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase">
+                    <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                         <span>Gasto: {formatCurrency(report?.totalSpent || 0)}</span>
                         <span>Limite: {formatCurrency(report?.totalBudget || 0)}</span>
                     </div>
@@ -280,10 +316,14 @@ const BudgetsScreen: React.FC = () => {
                             <span className="text-slate-900 dark:text-white">{formatCurrency(report?.variableSpent || 0)}</span>
                         </h3>
                         {report?.categories.map(cat => {
-                            const percent = cat.budget ? Math.min(100, (cat.spent! / cat.budget) * 100) : 0;
-                            const isOver = cat.budget && cat.spent! > cat.budget;
+                            const budget = cat.budget || 0;
+                            const spent = cat.spent || 0;
+                            const percent = budget > 0 ? Math.min(100, (spent / budget) * 100) : 0;
+                            const isOver = budget > 0 && spent > budget;
+                            const remaining = Math.max(0, budget - spent);
+
                             return (
-                                <div key={cat.id} onClick={() => { setEditingCategory(cat); setNewLimit(cat.budget?.toString() || ''); }} className={`flex flex-col gap-2 p-4 bg-white dark:bg-[#1e2330] rounded-2xl border ${isOver ? 'border-red-500/50 bg-red-50 dark:bg-red-900/10' : 'border-transparent'} shadow-sm active:scale-[0.98] transition-transform`}>
+                                <div key={cat.id} onClick={() => { setEditingCategory(cat); setNewLimit(budget > 0 ? budget.toFixed(2).replace('.', ',') : ''); }} className={`flex flex-col gap-2 p-4 bg-white dark:bg-[#1e2330] rounded-2xl border ${isOver ? 'border-red-500/50 bg-red-50 dark:bg-red-900/10' : 'border-transparent'} shadow-sm active:scale-[0.98] transition-transform`}>
                                     <div className="flex justify-between items-center">
                                         <div className="flex items-center gap-3">
                                             <div className={`w-10 h-10 rounded-full flex items-center justify-center ${cat.bgClass} ${cat.colorClass}`}>
@@ -291,15 +331,26 @@ const BudgetsScreen: React.FC = () => {
                                             </div>
                                             <div>
                                                 <p className="font-bold text-sm dark:text-white">{cat.name}</p>
-                                                <p className="text-[10px] text-slate-400">{cat.budget ? `${Math.round(percent)}% do limite` : 'Sem limite definido'}</p>
+                                                {/* Category Limit Text - Updated Dynamic Display */}
+                                                <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mt-0.5">
+                                                    {budget > 0 
+                                                        ? `LIMITE: ${formatCurrency(budget)}` 
+                                                        : 'SEM LIMITE DEFINIDO'}
+                                                </p>
                                             </div>
                                         </div>
                                         <div className="text-right">
-                                            <p className="font-bold text-sm dark:text-white">{formatCurrency(cat.spent || 0)}</p>
-                                            <p className="text-[10px] text-slate-400">Meta: {formatCurrency(cat.budget || 0)}</p>
+                                            <p className={`font-bold text-sm ${isOver ? 'text-red-500' : 'dark:text-white'}`}>{formatCurrency(spent)}</p>
+                                            {budget > 0 ? (
+                                                <p className="text-[10px] text-slate-400 font-medium">
+                                                    {remaining > 0 ? `Restam ${formatCurrency(remaining)}` : 'Esgotado'}
+                                                </p>
+                                            ) : (
+                                                <p className="text-[10px] text-slate-400 font-medium">{Math.round(percent)}%</p>
+                                            )}
                                         </div>
                                     </div>
-                                    {cat.budget! > 0 && (
+                                    {budget > 0 && (
                                         <div className="h-1.5 w-full bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
                                             <div className={`h-full rounded-full ${isOver ? 'bg-red-500' : percent > 90 ? 'bg-orange-500' : 'bg-primary'}`} style={{ width: `${percent}%` }}></div>
                                         </div>
@@ -391,16 +442,104 @@ const BudgetsScreen: React.FC = () => {
         )}
       </main>
 
-      {/* Edit Budget Modal */}
-      {editingCategory && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setEditingCategory(null)}>
+      {/* Settings Modal (Gear Icon) */}
+      {settingsMenuOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setSettingsMenuOpen(false)}>
             <div className="bg-white dark:bg-[#1e2330] w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-[scale-in_0.2s_ease-out]" onClick={e => e.stopPropagation()}>
-                <h3 className="text-lg font-bold dark:text-white mb-4">Definir Orçamento</h3>
-                <div className="flex items-center gap-2 border-b-2 border-primary pb-2 mb-6">
-                    <span className="text-xl font-bold text-slate-400">R$</span>
-                    <input autoFocus type="number" value={newLimit} onChange={e => setNewLimit(e.target.value)} className="w-full bg-transparent border-none text-2xl font-bold dark:text-white focus:ring-0 p-0" placeholder="0.00" />
+                <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-bold dark:text-white">Configurações</h3>
+                    <button onClick={() => setSettingsMenuOpen(false)}><span className="material-symbols-outlined text-slate-400">close</span></button>
                 </div>
-                <button onClick={handleSaveBudget} className="w-full py-3 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/30">Salvar Orçamento</button>
+                
+                <div className="flex flex-col gap-3">
+                    <button onClick={handleManageCategories} className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-[#111620] rounded-xl hover:bg-slate-100 dark:hover:bg-[#1A2231] transition-colors text-left">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
+                            <span className="material-symbols-outlined text-[20px]">category</span>
+                        </div>
+                        <div>
+                            <p className="text-sm font-bold dark:text-white">Gerenciar Categorias</p>
+                            <p className="text-xs text-slate-500">Crie ou edite categorias de gastos</p>
+                        </div>
+                    </button>
+
+                    <button onClick={handleResetBudgetsClick} className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/10 rounded-xl hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors text-left">
+                        <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center text-red-600 dark:text-red-400">
+                            <span className="material-symbols-outlined text-[20px]">local_fire_department</span>
+                        </div>
+                        <div>
+                            <p className="text-sm font-bold text-red-600 dark:text-red-400">Redefinir Orçamentos</p>
+                            <p className="text-xs text-red-400/80">Zerar todos os limites definidos</p>
+                        </div>
+                    </button>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Confirmation Modal for Reset Budgets */}
+      {showResetModal && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowResetModal(false)}>
+            <div className="bg-white dark:bg-[#1e2330] w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-[scale-in_0.2s_ease-out] border border-red-500/10" onClick={e => e.stopPropagation()}>
+                <div className="flex flex-col items-center text-center gap-4">
+                    <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-500/10 flex items-center justify-center text-red-500">
+                        <span className="material-symbols-outlined text-4xl">local_fire_department</span>
+                    </div>
+                    <div>
+                        <h3 className="text-xl font-bold dark:text-white mb-1">Redefinir Orçamentos?</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400">
+                            Isso irá <span className="font-bold text-red-500">ZERAR</span> todas as metas de orçamento de todas as categorias.
+                        </p>
+                        <p className="text-xs text-slate-400 mt-2">Suas transações e histórico não serão afetados.</p>
+                    </div>
+                    
+                    <div className="flex gap-3 w-full mt-2">
+                        <button 
+                            onClick={() => setShowResetModal(false)}
+                            className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                        >
+                            Cancelar
+                        </button>
+                        <button 
+                            onClick={confirmResetBudgets}
+                            className="flex-1 py-3 rounded-xl font-bold bg-red-500 text-white shadow-lg shadow-red-500/30 active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                            Confirmar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+      )}
+
+      {/* Edit Budget Modal - UPDATED DESIGN */}
+      {editingCategory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm px-4" onClick={() => setEditingCategory(null)}>
+            <div className="bg-[#192233] w-full max-w-xs rounded-3xl p-6 shadow-2xl animate-[scale-in_0.2s_ease-out] border border-slate-800" onClick={e => e.stopPropagation()}>
+                <h3 className="text-lg font-bold text-white mb-6">Definir Orçamento</h3>
+                
+                <div className="mb-8">
+                    <label className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2 block">VALOR MENSAL</label>
+                    <div className="flex items-baseline gap-1 border-b border-slate-700 pb-2">
+                        <span className="text-2xl font-bold text-slate-400">R$</span>
+                        <input 
+                            autoFocus 
+                            type="text"
+                            inputMode="numeric"
+                            value={newLimit} 
+                            onChange={e => setNewLimit(currencyMask(e.target.value))} 
+                            className="w-full bg-transparent border-none text-4xl font-bold text-white focus:ring-0 p-0 placeholder-slate-700" 
+                            placeholder="0,00" 
+                        />
+                    </div>
+                </div>
+                
+                <button 
+                    onClick={handleSaveBudget} 
+                    disabled={isSavingBudget}
+                    className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-all flex items-center justify-center"
+                >
+                    {isSavingBudget ? <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : 'Salvar Orçamento'}
+                </button>
             </div>
         </div>
       )}

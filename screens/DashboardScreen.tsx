@@ -148,11 +148,15 @@ const DashboardScreen: React.FC = () => {
         const data = await db.getDashboardMetrics();
         const chartData = await db.getMonthlyData();
         const recentTxs = await db.getTransactions();
+        
+        // Filter Future Transactions for "Recent List"
+        const todayStr = new Date().toISOString().split('T')[0];
+        const filteredRecent = recentTxs.filter(t => t.date <= todayStr);
 
         setMetrics(data.metrics);
         setInsights(data.insights);
         setMonthlyChartData(chartData);
-        setTransactions(recentTxs.slice(0, 3)); // Only need top 3 here
+        setTransactions(filteredRecent.slice(0, 3)); // Top 3 relevant
 
       } catch (e) {
         console.error("Dashboard Load Error", e);
@@ -419,10 +423,13 @@ const DashboardScreen: React.FC = () => {
                      <p className="text-text-secondary text-xs truncate">{t.subtitle}</p>
                    </div>
                  </div>
-                 <p className={`text-sm font-bold whitespace-nowrap ml-2 ${t.type === 'income' ? 'text-green-400' : 'text-white'}`}>
-                   {t.type === 'expense' ? '- ' : '+ '}
-                   {formatValue(t.amount)}
-                 </p>
+                 <div className="flex flex-col items-end gap-0.5 ml-2 shrink-0">
+                    <p className={`text-sm font-bold whitespace-nowrap ${t.type === 'income' ? 'text-green-400' : 'text-white'}`}>
+                      {t.type === 'expense' ? '- ' : '+ '}
+                      {formatValue(t.amount)}
+                    </p>
+                    <p className="text-[9px] text-text-secondary">{new Date(t.date).toLocaleDateString('pt-BR')}</p>
+                 </div>
                </div>
              )) : (
                !loading && <div className="px-4 py-8 text-center text-text-secondary text-sm">Nenhuma transação recente.</div>
