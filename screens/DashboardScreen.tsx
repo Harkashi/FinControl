@@ -104,12 +104,20 @@ const DashboardScreen: React.FC = () => {
   const navigate = useNavigate();
   const { privacyMode, chartStyle } = useTheme();
   // USE CONTEXT
-  const { dashboardMetrics: metrics, monthlyInsights: insights, transactions, loading, refreshData } = useData();
+  const { dashboardMetrics: metrics, monthlyInsights: insights, transactions, loading, refreshing, refreshData } = useData();
   
   const [userName, setUserName] = useState('Usuário');
   const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
   const [isShortcutOpen, setIsShortcutOpen] = useState(false);
   
+  // Force data refresh on mount to avoid stale or zeroed state from initial Context load
+  useEffect(() => {
+    refreshData();
+  }, []);
+
+  // Show loading skeleton if initial load OR if refreshing while empty (avoids flashing skeleton on pull-to-refresh if data exists)
+  const isLoading = loading || (refreshing && (!transactions || transactions.length === 0));
+
   // Helpers
   const formatValue = (val: number, minimumFractionDigits = 2) => {
     if (privacyMode) return '••••••';
@@ -187,10 +195,10 @@ const DashboardScreen: React.FC = () => {
                 onClick={refreshData}
                 className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-[#192233] text-white hover:bg-[#232f48] transition-colors active:scale-95"
             >
-                <span className={`material-symbols-outlined ${loading ? 'animate-spin' : ''}`}>refresh</span>
+                <span className={`material-symbols-outlined ${refreshing ? 'animate-spin' : ''}`}>refresh</span>
             </button>
             <button 
-                onClick={() => navigate('/profile')} // Quick toggle or navigate? Let's keep privacy toggle
+                onClick={() => navigate('/profile')} 
                 className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-[#192233] text-white hover:bg-[#232f48] transition-colors active:scale-95"
             >
                 <span className="material-symbols-outlined">settings</span>
@@ -208,7 +216,7 @@ const DashboardScreen: React.FC = () => {
               <div className="flex justify-between items-start mb-1">
                 <p className="text-blue-100 text-sm font-medium opacity-90">Saldo Total</p>
                 {/* Financial Health Indicator */}
-                {!loading && metrics && (
+                {!isLoading && metrics && (
                   <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border border-white/20 ${
                       metrics.financialHealth === 'excellent' ? 'bg-green-400/20 text-green-100' : 
                       metrics.financialHealth === 'good' ? 'bg-blue-400/20 text-blue-100' :
@@ -221,7 +229,7 @@ const DashboardScreen: React.FC = () => {
                 )}
               </div>
               
-              {loading ? (
+              {isLoading ? (
                 <Skeleton className="h-10 w-40 mb-6 bg-white/10" />
               ) : (
                 <h1 className="text-2xl sm:text-3xl font-extrabold text-white mb-2 tracking-tight">
@@ -249,7 +257,7 @@ const DashboardScreen: React.FC = () => {
                         </span>
                     )}
                   </div>
-                  {loading ? <Skeleton className="h-5 w-20 bg-white/10" /> : (
+                  {isLoading ? <Skeleton className="h-5 w-20 bg-white/10" /> : (
                       <p className="text-white font-bold tracking-tight text-xs sm:text-sm truncate">
                         {privacyMode ? '••••' : `+ ${formatValue(metrics?.income || 0, 0)}`}
                       </p>
@@ -268,7 +276,7 @@ const DashboardScreen: React.FC = () => {
                         </span>
                     )}
                   </div>
-                  {loading ? <Skeleton className="h-5 w-20 bg-white/10" /> : (
+                  {isLoading ? <Skeleton className="h-5 w-20 bg-white/10" /> : (
                       <p className="text-white font-bold tracking-tight text-xs sm:text-sm truncate">
                         {privacyMode ? '••••' : `- ${formatValue(metrics?.expense || 0, 0)}`}
                       </p>
@@ -309,7 +317,7 @@ const DashboardScreen: React.FC = () => {
           </div>
 
           {/* Last Transaction Widget */}
-          {!loading && metrics?.lastTransaction ? (
+          {!isLoading && metrics?.lastTransaction ? (
              <div className="flex items-center justify-between p-3 rounded-xl bg-[#192233]/50 border border-white/5 animate-[fade-in_0.5s]">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                    <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center ${metrics.lastTransaction.type === 'income' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
@@ -322,7 +330,7 @@ const DashboardScreen: React.FC = () => {
                 </div>
                 <span className="text-xs font-bold text-white whitespace-nowrap ml-2">{formatValue(metrics.lastTransaction.amount)}</span>
              </div>
-          ) : !loading && (
+          ) : !isLoading && (
              <div className="text-center py-2 text-xs text-text-secondary">Nenhuma transação recente</div>
           )}
         </div>
@@ -344,7 +352,7 @@ const DashboardScreen: React.FC = () => {
            {/* Chart Container */}
            <div className="bg-[#192233] rounded-xl p-4 border border-white/5 shadow-sm mb-4">
                  <div className="w-full h-40 min-w-0 relative">
-                    {!loading && !privacyMode ? (
+                    {!isLoading && !privacyMode ? (
                       <ResponsiveContainer width="100%" height="100%" minWidth={0}>
                          <BarChart data={monthlyChartData}>
                             {!isMinimal && <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#ffffff10" />}
@@ -363,7 +371,7 @@ const DashboardScreen: React.FC = () => {
                       </ResponsiveContainer>
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-white/5 rounded-lg">
-                         {loading ? <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div> : <span className="material-symbols-outlined text-slate-500">visibility_off</span>}
+                         {isLoading ? <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin"></div> : <span className="material-symbols-outlined text-slate-500">visibility_off</span>}
                       </div>
                     )}
                  </div>
@@ -372,21 +380,21 @@ const DashboardScreen: React.FC = () => {
            {/* Insights Mini Cards (Grid Layout for Mobile Responsiveness) */}
            <div className="grid grid-cols-3 gap-2 pb-2">
               <InsightCard 
-                 isLoading={loading}
+                 isLoading={isLoading}
                  icon="savings" 
                  title="Economia" 
                  value={formatValue(insights?.savings || 0)} 
                  colorClass="text-green-400 bg-green-400" 
               />
               <InsightCard 
-                 isLoading={loading}
+                 isLoading={isLoading}
                  icon="local_fire_department" 
                  title="Maior Gasto" 
                  value={formatValue(insights?.biggestExpense?.amount || 0)} 
                  colorClass="text-red-400 bg-red-400" 
               />
               <InsightCard 
-                 isLoading={loading}
+                 isLoading={isLoading}
                  icon="category" 
                  title="Top Categoria" 
                  value={insights?.topCategory?.name || '-'} 
@@ -401,7 +409,7 @@ const DashboardScreen: React.FC = () => {
              <h3 className="text-white text-lg font-bold leading-tight tracking-[-0.015em]">Recentes</h3>
           </div>
           <div className="flex flex-col gap-[1px]">
-             {!loading && recentTransactions.length > 0 ? recentTransactions.map((t, index) => (
+             {!isLoading && recentTransactions.length > 0 ? recentTransactions.map((t, index) => (
                <div key={t.id} className={`flex items-center justify-between px-4 py-4 bg-[#192233] mx-4 hover:bg-[#202b40] transition-colors cursor-pointer group ${index === 0 ? 'rounded-t-xl' : ''} ${index === recentTransactions.length -1 ? 'rounded-b-xl' : ''}`}>
                  <div className="flex items-center gap-4 overflow-hidden flex-1 min-w-0">
                    <div className={`w-11 h-11 rounded-full shrink-0 flex items-center justify-center transition-colors ${t.bgClass} ${t.colorClass}`}>
@@ -421,7 +429,7 @@ const DashboardScreen: React.FC = () => {
                  </div>
                </div>
              )) : (
-               !loading && <div className="px-4 py-8 text-center text-text-secondary text-sm">Nenhuma transação recente.</div>
+               !isLoading && <div className="px-4 py-8 text-center text-text-secondary text-sm">Nenhuma transação recente.</div>
              )}
           </div>
           <div className="h-6"></div>
