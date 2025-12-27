@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { db } from '../services/database';
 import { Transaction, Category, Wallet, PaymentMethod, FinancialGoal, DashboardMetrics, MonthlyInsight, BudgetReport } from '../types';
@@ -92,7 +93,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const addTransaction = async (txData: any) => {
     const result = await db.addTransaction(txData);
     if (result.success) {
-        loadAllData(); 
+        await loadAllData(); // Ensure state is updated before resolving
     }
     return result;
   };
@@ -154,11 +155,15 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const categoryExpenses: Record<string, number> = {};
     const expenseFrequency: Record<string, {count: number, amount: number, categoryId: string}> = {};
 
+    // Get Today in YYYY-MM-DD local
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
     transactions.forEach(t => {
         const tDate = new Date(t.date);
         const adjustedDate = new Date(tDate.getTime() + tDate.getTimezoneOffset() * 60000);
         
-        if (t.date <= now.toISOString().split('T')[0]) {
+        // Use string comparison for exact date match or prior
+        if (t.date <= todayStr) {
             if (t.type === 'income') balance += t.amount; else balance -= t.amount;
         }
 
@@ -205,7 +210,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
             amount: data.amount 
         }));
 
-    const lastTransaction = transactions.find(t => t.date <= now.toISOString().split('T')[0]) || null;
+    const lastTransaction = transactions.find(t => t.date <= todayStr) || null;
 
     return {
         balance, income, expense,

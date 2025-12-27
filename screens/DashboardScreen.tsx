@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 import BottomNav from '../components/BottomNav';
@@ -152,10 +153,22 @@ const DashboardScreen: React.FC = () => {
       return daysArray;
   }, [transactions]);
 
-  // Recent transactions (Top 3 relevant)
+  // Recent transactions (Top 3 relevant) - FIXED SORTING
   const recentTransactions = useMemo(() => {
-      const todayStr = new Date().toISOString().split('T')[0];
-      return transactions.filter(t => t.date <= todayStr).slice(0, 3);
+      const now = new Date();
+      // Use local YYYY-MM-DD
+      const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+      
+      return [...transactions]
+        .filter(t => t.date <= todayStr)
+        .sort((a, b) => {
+            // Sort by Date Descending
+            const dateDiff = b.date.localeCompare(a.date);
+            if (dateDiff !== 0) return dateDiff;
+            // Tie-break: Sort by CreatedAt Descending
+            return (b.created_at || '').localeCompare(a.created_at || '');
+        })
+        .slice(0, 3);
   }, [transactions]);
 
   useEffect(() => {
@@ -317,18 +330,18 @@ const DashboardScreen: React.FC = () => {
           </div>
 
           {/* Last Transaction Widget */}
-          {!isLoading && metrics?.lastTransaction ? (
+          {!isLoading && recentTransactions.length > 0 ? (
              <div className="flex items-center justify-between p-3 rounded-xl bg-[#192233]/50 border border-white/5 animate-[fade-in_0.5s]">
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                   <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center ${metrics.lastTransaction.type === 'income' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                      <span className="material-symbols-outlined text-[16px]">{metrics.lastTransaction.icon || 'payments'}</span>
+                   <div className={`w-8 h-8 rounded-full shrink-0 flex items-center justify-center ${recentTransactions[0].type === 'income' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                      <span className="material-symbols-outlined text-[16px]">{recentTransactions[0].icon || 'payments'}</span>
                    </div>
                    <div className="flex flex-col min-w-0">
-                      <span className="text-xs font-bold text-white leading-tight truncate">Última: {metrics.lastTransaction.title}</span>
-                      <span className="text-[10px] text-text-secondary truncate">{timeAgo(metrics.lastTransaction.created_at || metrics.lastTransaction.date)}</span>
+                      <span className="text-xs font-bold text-white leading-tight truncate">Última: {recentTransactions[0].title}</span>
+                      <span className="text-[10px] text-text-secondary truncate">{timeAgo(recentTransactions[0].created_at || recentTransactions[0].date)}</span>
                    </div>
                 </div>
-                <span className="text-xs font-bold text-white whitespace-nowrap ml-2">{formatValue(metrics.lastTransaction.amount)}</span>
+                <span className="text-xs font-bold text-white whitespace-nowrap ml-2">{formatValue(recentTransactions[0].amount)}</span>
              </div>
           ) : !isLoading && (
              <div className="text-center py-2 text-xs text-text-secondary">Nenhuma transação recente</div>

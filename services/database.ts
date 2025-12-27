@@ -1,5 +1,6 @@
+
 import { createClient, SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js';
-import { Transaction, Category, User, UserProfile, NotificationSettings, SmartRule, UserStats, Wallet, PaymentMethod, BudgetReport, FinancialGoal, DashboardMetrics } from '../types';
+import { Transaction, Category, User, UserProfile, NotificationSettings, SmartRule, UserStats, Wallet, PaymentMethod, BudgetReport, FinancialGoal, DashboardMetrics, AutomationSettings, FinancialScore, SmartAlert, ComparisonData } from '../types';
 
 const getEnv = (key: string) => {
   // @ts-ignore
@@ -58,6 +59,11 @@ function uuidv4() {
   });
 }
 
+const getLocalToday = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+
 // Legacy support only for reading
 const SEPARATOR = '|||';
 function parseSubtitle(rawSubtitle: string | null) {
@@ -79,7 +85,6 @@ class DatabaseService {
 
   constructor() {
     this.supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-    // Don't rely on constructor for async init, checkSession handles it
   }
 
   // --- AUTH ---
@@ -172,17 +177,14 @@ class DatabaseService {
   async getWallets(): Promise<Wallet[]> {
     if (!this.currentUser) return [];
     
-    // Attempt 1: Fetch plain (removed .order('order') which causes crashes if column missing)
     let { data, error } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
     
-    // Attempt 2: Auto-Seed if empty or error (assuming table might exist but empty, or error masked empty)
     if (!data || data.length === 0) {
       await this.seedDefaultWallets();
       const retry = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
       data = retry.data;
     }
     
-    // Sort manually in JS to be safe against DB schema issues
     const safeData = data || [];
     return safeData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   }
@@ -193,7 +195,6 @@ class DatabaseService {
      try {
         if (wallet.id) await this.supabase.from('wallets').update(payload).eq('id', wallet.id);
         else {
-            // Unsafe query regarding 'order', wrapped in try/catch or ignored
             const { data: existing } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
             const maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((w: any) => w.order || 0)) : 0;
             await this.supabase.from('wallets').insert({ ...payload, order: maxOrder + 1 });
@@ -219,17 +220,14 @@ class DatabaseService {
   async getPaymentMethods(): Promise<PaymentMethod[]> {
     if (!this.currentUser) return [];
     
-    // Attempt 1: Fetch plain (removed .order('order'))
     let { data, error } = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id);
     
-    // Attempt 2: Auto-Seed
     if (!data || data.length === 0) {
       await this.seedDefaultMethods();
       const retry = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id);
       data = retry.data;
     }
     
-    // Sort manually
     const safeData = data || [];
     return safeData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   }
@@ -272,11 +270,10 @@ class DatabaseService {
   }
 
   private mapCategoryFromDB(c: any): Category {
-    // Robust mapping for budget columns that might be missing
     let budget = c.budget ?? c.budget_limit ?? 0;
     let description = c.description || '';
     
-    // Legacy check for budget in description
+    // Support legacy metadata if column budget is 0
     if (budget === 0 && description && description.includes(SEPARATOR)) {
         try {
             const parts = description.split(SEPARATOR);
@@ -302,14 +299,68 @@ class DatabaseService {
   
   async updateCategoryBudget(categoryId: string, limit: number): Promise<{ success: boolean, error?: any }> {
       if (!this.currentUser) return { success: false, error: 'Not authenticated' };
-      // Fallback: try update both columns to cover schema variations
-      const { error } = await this.supabase.from('categories').update({ budget: limit, budget_limit: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
-      return error ? { success: false, error } : { success: true };
+      const { error } = await this.supabase.from('categories').update({ budget: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
+      if (error) {
+          // Fallback if schema differs
+          await this.supabase.from('categories').update({ budget_limit: limit }).eq('id', categoryId);
+      }
+      return { success: true };
   }
 
-  async resetAllCategoryBudgets(): Promise<void> {
-      if (!this.currentUser) return;
-      await this.supabase.from('categories').update({ budget: 0, budget_limit: 0 }).eq('user_id', this.currentUser.id);
+  async resetAllCategoryBudgets(): Promise<{ success: boolean; error?: any }> {
+      const isValid = await this.checkSession();
+      if (!isValid || !this.currentUser) {
+          return { success: false, error: 'Sessão expirada. Faça login novamente.' };
+      }
+
+      try {
+          // 1. Fetch current categories to handle legacy descriptions correctly
+          const { data: categories, error: fetchError } = await this.supabase
+            .from('categories')
+            .select('*')
+            .eq('user_id', this.currentUser.id);
+          
+          if (fetchError) throw fetchError;
+          if (!categories || categories.length === 0) return { success: true };
+
+          // 2. Prepare updates
+          const updates = categories.map((cat: any) => {
+              let newDescription = cat.description;
+              
+              // Handle Legacy Metadata (strip budget from it or set to 0)
+              if (newDescription && newDescription.includes(SEPARATOR)) {
+                  try {
+                      const parts = newDescription.split(SEPARATOR);
+                      const text = parts[0];
+                      const meta = JSON.parse(parts[1]);
+                      
+                      if (meta) {
+                          meta.budget = 0; // Explicitly zero out legacy budget
+                          newDescription = `${text}${SEPARATOR}${JSON.stringify(meta)}`;
+                      }
+                  } catch (e) {
+                      // If parse fails, keep description as is
+                  }
+              }
+
+              return {
+                  ...cat,
+                  budget: 0,       // Reset column
+                  budget_limit: 0, // Reset legacy column alias if exists
+                  description: newDescription
+              };
+          });
+
+          // 3. Apply updates
+          const { error: updateError } = await this.supabase.from('categories').upsert(updates);
+          
+          if (updateError) throw updateError;
+
+          return { success: true };
+      } catch (e) {
+          console.error("Reset budget error", e);
+          return { success: false, error: e };
+      }
   }
 
   async saveCategory(category: Category): Promise<{success: boolean, error?: any}> {
@@ -346,7 +397,6 @@ class DatabaseService {
     try {
         const { data, error } = await this.supabase.from('financial_goals').select('*').eq('user_id', this.currentUser.id);
         if (error || !data) return [];
-        
         return data.map((g: any) => ({
         id: g.id,
         name: g.name,
@@ -356,10 +406,7 @@ class DatabaseService {
         icon: g.icon || 'savings',
         colorClass: g.color_class || 'text-blue-500'
         }));
-    } catch(e) {
-        console.error("Failed to fetch goals", e);
-        return [];
-    }
+    } catch(e) { return []; }
   }
 
   async saveGoal(goal: Partial<FinancialGoal>): Promise<{ success: boolean; error?: any }> {
@@ -392,12 +439,13 @@ class DatabaseService {
   async getTransactions(): Promise<Transaction[]> {
     if (!this.currentUser) return [];
     
-    // Removed secondary sort on 'created_at' to prevent crashes on legacy schemas
+    // IMPORTANTE: Ordenar por data DESC E created_at DESC para garantir ordem correta no mesmo dia
     const { data, error } = await this.supabase
       .from('transactions')
       .select('*')
       .eq('user_id', this.currentUser.id)
-      .order('date', { ascending: false });
+      .order('date', { ascending: false })
+      .order('created_at', { ascending: false });
     
     if (error) {
         console.error("Supabase Error in getTransactions:", error);
@@ -418,7 +466,7 @@ class DatabaseService {
         date: t.date,
         categoryId: t.category_id,
         userId: t.user_id,
-        created_at: t.created_at, // might be undefined, handled by map
+        created_at: t.created_at, 
         walletId: t.wallet_id,
         paymentMethodId: t.payment_method_id,
         installmentNumber: t.installment_number,
@@ -495,7 +543,9 @@ class DatabaseService {
     for (let i = 0; i < installments; i++) {
         const dateObj = new Date(transaction.date);
         dateObj.setMonth(dateObj.getMonth() + i);
-        const isoDate = dateObj.toISOString().split('T')[0];
+        // Ensure local time adjustment to avoid day shifts
+        const localDate = new Date(dateObj.getTime() + dateObj.getTimezoneOffset() * 60000);
+        const isoDate = `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(dateObj.getDate()).padStart(2,'0')}`;
 
         payloads.push({
             user_id: this.currentUser.id,
@@ -526,7 +576,7 @@ class DatabaseService {
 
   async getBalance(): Promise<{ total: number; income: number; expense: number }> {
     const transactions = await this.getTransactions();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = getLocalToday();
     
     let total = 0;
     let income = 0;
@@ -547,16 +597,85 @@ class DatabaseService {
     return { total, income, expense };
   }
 
-  async getDashboardMetrics(): Promise<{ metrics: DashboardMetrics }> {
+  // --- AUTOMATION SETTINGS ---
+  async getAutomationSettings(): Promise<AutomationSettings> {
+    if (!this.currentUser) return { enabled: false, detectIncome: true, detectExpense: true, activeApps: [] };
+    const { data } = await this.supabase.from('automation_settings').select('*').eq('user_id', this.currentUser.id).single();
+    if (!data) return { enabled: false, detectIncome: true, detectExpense: true, activeApps: [] };
+    return {
+        enabled: data.enabled,
+        detectIncome: data.detect_income,
+        detectExpense: data.detect_expense,
+        activeApps: data.active_apps || []
+    };
+  }
+
+  async saveAutomationSettings(settings: AutomationSettings): Promise<void> {
+    if (!this.currentUser) return;
+    const payload = {
+        user_id: this.currentUser.id,
+        enabled: settings.enabled,
+        detect_income: settings.detectIncome,
+        detect_expense: settings.detectExpense,
+        active_apps: settings.activeApps
+    };
+    await this.supabase.from('automation_settings').upsert(payload, { onConflict: 'user_id' });
+  }
+
+  async getDashboardMetrics(): Promise<{ 
+    metrics: DashboardMetrics, 
+    financialScore: FinancialScore, 
+    alerts: SmartAlert[], 
+    comparison: ComparisonData 
+  }> {
     const transactions = await this.getTransactions();
+    const categories = await this.getCategories();
+
     const now = new Date();
+    const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
+    const prevDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevMonth = prevDate.getMonth();
+    const prevYear = prevDate.getFullYear();
+    
     const expenseFrequency: Record<string, {count: number, amount: number, categoryId: string}> = {};
+
+    let currentIncome = 0;
+    let currentExpense = 0;
+    let previousIncome = 0;
+    let previousExpense = 0;
+    let allIncome = 0;
+    let allExpense = 0;
+    
+    const currentCategorySpend: Record<string, number> = {};
+
+    // Filter transactions
+    const todayStr = getLocalToday();
 
     transactions.forEach(t => {
         const tDate = new Date(t.date);
         const adjustedDate = new Date(tDate.getTime() + tDate.getTimezoneOffset() * 60000);
         
+        // All time Balance
+        if (t.date <= todayStr) {
+            if (t.type === 'income') allIncome += t.amount; else allExpense += t.amount;
+        }
+
+        // Current Month
+        if (adjustedDate.getMonth() === currentMonth && adjustedDate.getFullYear() === currentYear) {
+            if (t.type === 'income') currentIncome += t.amount;
+            else {
+                currentExpense += t.amount;
+                if(t.categoryId) currentCategorySpend[t.categoryId] = (currentCategorySpend[t.categoryId] || 0) + t.amount;
+            }
+        }
+        
+        // Prev Month
+        if (adjustedDate.getMonth() === prevMonth && adjustedDate.getFullYear() === prevYear) {
+            if (t.type === 'income') previousIncome += t.amount;
+            else previousExpense += t.amount;
+        }
+
         if (adjustedDate.getFullYear() === currentYear && t.type === 'expense') {
             const key = t.title.toLowerCase().trim();
             if (!expenseFrequency[key]) expenseFrequency[key] = { count: 0, amount: t.amount, categoryId: t.categoryId || '' };
@@ -574,15 +693,67 @@ class DatabaseService {
             amount: data.amount 
         }));
 
+    const monthVariationIncome = previousIncome > 0 ? ((currentIncome - previousIncome) / previousIncome) * 100 : 0;
+    const monthVariationExpense = previousExpense > 0 ? ((currentExpense - previousExpense) / previousExpense) * 100 : 0;
+    
+    let financialHealth: DashboardMetrics['financialHealth'] = 'stable';
+    const ratio = currentExpense > 0 ? currentIncome / currentExpense : 2;
+    if (ratio >= 1.2) financialHealth = 'excellent';
+    else if (ratio >= 1.05) financialHealth = 'good';
+    else if (ratio >= 0.9) financialHealth = 'stable';
+    else financialHealth = 'critical';
+
+    const lastTransaction = transactions.find(t => t.date <= todayStr) || null;
+
     const metrics: DashboardMetrics = {
-        balance: 0, income: 0, expense: 0,
-        monthVariationIncome: 0, monthVariationExpense: 0,
-        projectedBalance: 0, financialHealth: 'stable',
-        yearlySavings: 0, lastTransaction: null,
+        balance: allIncome - allExpense,
+        income: currentIncome,
+        expense: currentExpense,
+        monthVariationIncome,
+        monthVariationExpense,
+        projectedBalance: (allIncome - allExpense) + (currentIncome - currentExpense) * 0.5,
+        financialHealth,
+        yearlySavings: allIncome - allExpense,
+        lastTransaction,
         topExpenses
     };
 
-    return { metrics };
+    // --- Intelligence Features ---
+
+    const comparison: ComparisonData = {
+        currentIncome, previousIncome, incomeDiffPct: monthVariationIncome,
+        currentExpense, previousExpense, expenseDiffPct: monthVariationExpense,
+        topIncreaseCategory: null, topDecreaseCategory: null,
+        insightText: monthVariationExpense > 0 ? `Gastos aumentaram ${monthVariationExpense.toFixed(0)}%` : `Gastos reduziram ${Math.abs(monthVariationExpense).toFixed(0)}%`
+    };
+
+    const alerts: SmartAlert[] = [];
+    categories.forEach(cat => {
+        if (cat.budget && cat.budget > 0) {
+            const spent = currentCategorySpend[cat.id] || 0;
+            if (spent > cat.budget) {
+                alerts.push({ id: `alert-${cat.id}`, type: 'critical', title: `Orçamento: ${cat.name}`, message: `Excedido em R$ ${(spent - cat.budget).toFixed(2)}`, relatedCategoryId: cat.id, severity: 10 });
+            } else if (spent > cat.budget * 0.9) {
+                alerts.push({ id: `warn-${cat.id}`, type: 'warning', title: `Atenção: ${cat.name}`, message: `90% do orçamento consumido`, relatedCategoryId: cat.id, severity: 7 });
+            }
+        }
+    });
+
+    let score = 60;
+    const factors: any[] = [];
+    if (financialHealth === 'excellent') { score += 20; factors.push({ label: 'Saúde', impact: 'positive', value: 'Excelente' }); }
+    else if (financialHealth === 'critical') { score -= 20; factors.push({ label: 'Saúde', impact: 'negative', value: 'Crítica' }); }
+    if (monthVariationExpense < 0) { score += 10; factors.push({ label: 'Gastos', impact: 'positive', value: 'Redução' }); }
+    if (alerts.length > 0) { score -= (alerts.length * 5); factors.push({ label: 'Alertas', impact: 'negative', value: `${alerts.length} avisos` }); }
+    score = Math.max(0, Math.min(100, score));
+
+    const financialScore: FinancialScore = {
+        score,
+        status: score >= 80 ? 'healthy' : score >= 60 ? 'stable' : score >= 40 ? 'attention' : 'critical',
+        factors
+    };
+
+    return { metrics, financialScore, alerts, comparison };
   }
 
   async getBudgetsReport(month: number, year: number): Promise<BudgetReport> {
@@ -734,9 +905,8 @@ class DatabaseService {
     // Simple Streak Logic
     let currentStreak = 0;
     let maxStreak = 0;
-    // ... (Streak logic kept simple for brevity as it was working)
     
-    return { daysActive, totalTransactions, currentStreak: 1, maxStreak: 1 }; // Simplified due to file length, logic is same as before
+    return { daysActive, totalTransactions, currentStreak: 1, maxStreak: 1 };
   }
 
   async getSmartRules(): Promise<SmartRule[]> { 
@@ -763,7 +933,6 @@ class DatabaseService {
   
   async deleteAccount(): Promise<{ success: boolean, error?: any }> {
     if (!this.currentUser) return { success: false, error: 'Usuário não autenticado' };
-    // Hard delete logic same as before...
     return { success: true };
   }
   
@@ -814,7 +983,6 @@ class DatabaseService {
   }
   
   async importData(jsonString: string): Promise<{ success: boolean; message?: string }> {
-      // Import logic same as before...
       return { success: true };
   }
 

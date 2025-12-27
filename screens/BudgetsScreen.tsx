@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState, useMemo } from 'react';
 import BottomNav from '../components/BottomNav';
 import { useTheme } from '../components/ThemeHandler';
@@ -40,6 +41,7 @@ const BudgetsScreen: React.FC = () => {
   // Settings Menu State
   const [settingsMenuOpen, setSettingsMenuOpen] = useState(false);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [isResetting, setIsResetting] = useState(false);
 
   // Edit Budget Modal
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
@@ -99,7 +101,6 @@ const BudgetsScreen: React.FC = () => {
     
     if (success) {
         setEditingCategory(null);
-        // FORCE RELOAD
         await loadData();
     } else {
         alert("Erro ao salvar orçamento. Tente novamente.");
@@ -108,28 +109,41 @@ const BudgetsScreen: React.FC = () => {
   };
 
   // --- SETTINGS MENU ACTIONS ---
-  const handleManageCategories = () => {
+  const handleManageCategories = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
       setSettingsMenuOpen(false);
       navigate('/categories');
   };
 
-  const handleResetBudgetsClick = () => {
+  const handleResetBudgetsClick = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
       setSettingsMenuOpen(false);
       setShowResetModal(true);
   };
 
-  const confirmResetBudgets = async () => {
-      setShowResetModal(false);
-      setLoading(true);
-      await db.resetAllCategoryBudgets();
-      await loadData();
+  const performReset = async () => {
+      setIsResetting(true);
+      const result = await db.resetAllCategoryBudgets();
+      
+      // Delay closing modal slightly to ensure state settles
+      setTimeout(async () => {
+          setIsResetting(false);
+          setShowResetModal(false);
+          if (result.success) {
+              await loadData();
+              alert("Orçamentos redefinidos com sucesso.");
+          } else {
+              alert(typeof result.error === 'string' ? result.error : "Erro ao redefinir orçamentos.");
+          }
+      }, 300);
   };
 
   // --- GOAL ACTIONS ---
   const handleOpenGoalModal = (goal?: FinancialGoal) => {
     if (goal) {
       setSelectedGoal(goal);
-      // Pre-fill form
       setGoalName(goal.name);
       setGoalTargetStr(goal.targetAmount.toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.'));
       setGoalCurrentStr(goal.currentAmount.toFixed(2).replace('.', ',').replace(/(\d)(?=(\d{3})+(?!\d))/g, '$1.'));
@@ -138,7 +152,6 @@ const BudgetsScreen: React.FC = () => {
       setGoalColor(goal.colorClass);
       setViewMode('details');
     } else {
-      // Reset form for new
       setSelectedGoal({});
       setGoalName('');
       setGoalTargetStr('');
@@ -160,11 +173,10 @@ const BudgetsScreen: React.FC = () => {
       setIsSubmittingGoal(true);
       await db.saveGoal({ ...selectedGoal, currentAmount: newTotal });
       
-      // Update local state
       setSelectedGoal(prev => ({ ...prev, currentAmount: newTotal }));
       setDepositAmountStr('');
       setIsSubmittingGoal(false);
-      loadData(); // Refresh bg list
+      loadData();
   };
 
   const handleSaveGoal = async () => {
@@ -198,7 +210,6 @@ const BudgetsScreen: React.FC = () => {
     }
   };
 
-  // --- CALCULATIONS FOR GOAL INSIGHTS ---
   const goalInsights = useMemo(() => {
       if (!selectedGoal.targetAmount) return null;
       
@@ -213,14 +224,13 @@ const BudgetsScreen: React.FC = () => {
       if (selectedGoal.deadline) {
           const today = new Date();
           const deadline = new Date(selectedGoal.deadline);
-          // Diff in months
           monthsLeft = (deadline.getFullYear() - today.getFullYear()) * 12 + (deadline.getMonth() - today.getMonth());
-          if (monthsLeft <= 0) monthsLeft = 0; // Expired or this month
+          if (monthsLeft <= 0) monthsLeft = 0;
           
           if (monthsLeft > 0 && remaining > 0) {
               monthlyNeeded = remaining / monthsLeft;
           } else if (remaining > 0) {
-              monthlyNeeded = remaining; // Need everything now
+              monthlyNeeded = remaining; 
           }
       }
 
@@ -254,19 +264,19 @@ const BudgetsScreen: React.FC = () => {
       <header className="bg-background-light dark:bg-background-dark pt-safe">
         <div className="flex items-center justify-between px-4 py-4">
           <div className="flex items-center gap-3">
-            <button onClick={() => navigate('/dashboard')} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/10 transition-colors -ml-2">
+            <button type="button" onClick={() => navigate('/dashboard')} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-white/10 transition-colors -ml-2">
                <span className="material-symbols-outlined dark:text-white">arrow_back</span>
             </button>
             <div className="flex flex-col">
                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">Planejamento</span>
                <div className="flex items-center gap-2 mt-0.5">
-                  <button onClick={() => handleMonthChange('prev')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_left</span></button>
+                  <button type="button" onClick={() => handleMonthChange('prev')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_left</span></button>
                   <span className="font-extrabold text-lg capitalize">{monthName}</span>
-                  <button onClick={() => handleMonthChange('next')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_right</span></button>
+                  <button type="button" onClick={() => handleMonthChange('next')} className="p-1 rounded-full hover:bg-slate-100 dark:hover:bg-white/10"><span className="material-symbols-outlined text-[18px]">chevron_right</span></button>
                </div>
             </div>
           </div>
-          <button onClick={() => setSettingsMenuOpen(true)} className="w-10 h-10 rounded-full bg-slate-100 dark:bg-[#192233] flex items-center justify-center hover:bg-slate-200 dark:hover:bg-[#232f48] transition-colors">
+          <button type="button" onClick={() => setSettingsMenuOpen(true)} className="w-10 h-10 rounded-full bg-slate-100 dark:bg-[#192233] flex items-center justify-center hover:bg-slate-200 dark:hover:bg-[#232f48] transition-colors">
              <span className="material-symbols-outlined">settings</span>
           </button>
         </div>
@@ -305,9 +315,9 @@ const BudgetsScreen: React.FC = () => {
 
             {/* Tabs */}
             <div className="flex bg-white dark:bg-[#192233] p-1 rounded-xl shadow-sm border border-slate-100 dark:border-slate-800">
-                <button onClick={() => setActiveTab('variable')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'variable' ? 'bg-slate-900 dark:bg-primary text-white shadow' : 'text-slate-500'}`}>Variável</button>
-                <button onClick={() => setActiveTab('committed')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'committed' ? 'bg-slate-900 dark:bg-primary text-white shadow' : 'text-slate-500'}`}>Compromissos</button>
-                <button onClick={() => setActiveTab('goals')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'goals' ? 'bg-slate-900 dark:bg-primary text-white shadow' : 'text-slate-500'}`}>Metas</button>
+                <button type="button" onClick={() => setActiveTab('variable')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'variable' ? 'bg-slate-900 dark:bg-primary text-white shadow' : 'text-slate-500'}`}>Variável</button>
+                <button type="button" onClick={() => setActiveTab('committed')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'committed' ? 'bg-slate-900 dark:bg-primary text-white shadow' : 'text-slate-500'}`}>Compromissos</button>
+                <button type="button" onClick={() => setActiveTab('goals')} className={`flex-1 py-2 text-xs font-bold rounded-lg transition-all ${activeTab === 'goals' ? 'bg-slate-900 dark:bg-primary text-white shadow' : 'text-slate-500'}`}>Metas</button>
             </div>
 
             {/* CONTENT */}
@@ -406,11 +416,11 @@ const BudgetsScreen: React.FC = () => {
                             <div className="flex flex-col items-center justify-center py-10 opacity-60">
                                 <span className="material-symbols-outlined text-6xl text-slate-300 dark:text-slate-700 mb-4">flag</span>
                                 <p className="text-sm font-bold text-slate-500">Nenhuma meta ativa</p>
-                                <button onClick={() => handleOpenGoalModal()} className="mt-4 px-4 py-2 bg-slate-200 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300">+ Nova Meta</button>
+                                <button type="button" onClick={() => handleOpenGoalModal()} className="mt-4 px-4 py-2 bg-slate-200 dark:bg-slate-800 rounded-lg text-xs font-bold text-slate-600 dark:text-slate-300">+ Nova Meta</button>
                             </div>
                         ) : (
                             <>
-                                <button onClick={() => handleOpenGoalModal()} className="w-full py-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl text-slate-500 font-bold text-sm hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">+ Nova Meta</button>
+                                <button type="button" onClick={() => handleOpenGoalModal()} className="w-full py-3 border-2 border-dashed border-slate-300 dark:border-slate-700 rounded-xl text-slate-500 font-bold text-sm hover:bg-slate-50 dark:hover:bg-white/5 transition-colors">+ Nova Meta</button>
                                 {report.goals.map(goal => {
                                     const percent = Math.min(100, (goal.currentAmount / goal.targetAmount) * 100);
                                     return (
@@ -452,11 +462,11 @@ const BudgetsScreen: React.FC = () => {
             <div className="bg-white dark:bg-[#1e2330] w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-[scale-in_0.2s_ease-out]" onClick={e => e.stopPropagation()}>
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-lg font-bold dark:text-white">Configurações</h3>
-                    <button onClick={() => setSettingsMenuOpen(false)}><span className="material-symbols-outlined text-slate-400">close</span></button>
+                    <button type="button" onClick={() => setSettingsMenuOpen(false)}><span className="material-symbols-outlined text-slate-400">close</span></button>
                 </div>
                 
                 <div className="flex flex-col gap-3">
-                    <button onClick={handleManageCategories} className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-[#111620] rounded-xl hover:bg-slate-100 dark:hover:bg-[#1A2231] transition-colors text-left">
+                    <button type="button" onClick={handleManageCategories} className="flex items-center gap-3 p-4 bg-slate-50 dark:bg-[#111620] rounded-xl hover:bg-slate-100 dark:hover:bg-[#1A2231] transition-colors text-left">
                         <div className="w-10 h-10 rounded-full bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-400">
                             <span className="material-symbols-outlined text-[20px]">category</span>
                         </div>
@@ -466,7 +476,7 @@ const BudgetsScreen: React.FC = () => {
                         </div>
                     </button>
 
-                    <button onClick={handleResetBudgetsClick} className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/10 rounded-xl hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors text-left">
+                    <button type="button" onClick={handleResetBudgetsClick} className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/10 rounded-xl hover:bg-red-100 dark:hover:bg-red-900/20 transition-colors text-left">
                         <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-500/20 flex items-center justify-center text-red-600 dark:text-red-400">
                             <span className="material-symbols-outlined text-[20px]">local_fire_department</span>
                         </div>
@@ -480,9 +490,9 @@ const BudgetsScreen: React.FC = () => {
         </div>
       )}
 
-      {/* Confirmation Modal for Reset Budgets */}
+      {/* Confirmation Modal for Reset Budgets - Reimplemented */}
       {showResetModal && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowResetModal(false)}>
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm px-4" onClick={() => setShowResetModal(false)}>
             <div className="bg-white dark:bg-[#1e2330] w-full max-w-sm rounded-2xl p-6 shadow-2xl animate-[scale-in_0.2s_ease-out] border border-red-500/10" onClick={e => e.stopPropagation()}>
                 <div className="flex flex-col items-center text-center gap-4">
                     <div className="w-16 h-16 rounded-full bg-red-100 dark:bg-red-500/10 flex items-center justify-center text-red-500">
@@ -498,16 +508,19 @@ const BudgetsScreen: React.FC = () => {
                     
                     <div className="flex gap-3 w-full mt-2">
                         <button 
+                            type="button"
                             onClick={() => setShowResetModal(false)}
                             className="flex-1 py-3 rounded-xl font-bold text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                         >
                             Cancelar
                         </button>
                         <button 
-                            onClick={confirmResetBudgets}
+                            type="button"
+                            onClick={performReset}
+                            disabled={isResetting}
                             className="flex-1 py-3 rounded-xl font-bold bg-red-500 text-white shadow-lg shadow-red-500/30 active:scale-95 transition-all flex items-center justify-center gap-2"
                         >
-                            Confirmar
+                            {isResetting ? 'Processando...' : 'Confirmar'}
                         </button>
                     </div>
                 </div>
@@ -515,7 +528,7 @@ const BudgetsScreen: React.FC = () => {
         </div>
       )}
 
-      {/* Edit Budget Modal - UPDATED DESIGN */}
+      {/* Edit Budget Modal */}
       {editingCategory && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm px-4" onClick={() => setEditingCategory(null)}>
             <div className="bg-[#192233] w-full max-w-xs rounded-3xl p-6 shadow-2xl animate-[scale-in_0.2s_ease-out] border border-slate-800" onClick={e => e.stopPropagation()}>
@@ -538,6 +551,7 @@ const BudgetsScreen: React.FC = () => {
                 </div>
                 
                 <button 
+                    type="button"
                     onClick={handleSaveBudget} 
                     disabled={isSavingBudget}
                     className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-all flex items-center justify-center"
@@ -554,15 +568,13 @@ const BudgetsScreen: React.FC = () => {
             <div className="bg-white dark:bg-[#1e2330] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl animate-[slide-up_0.3s] sm:animate-[scale-in_0.2s_ease-out] flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
                     <h3 className="text-lg font-bold dark:text-white">Compromissos Parcelados</h3>
-                    <button onClick={() => setInstallmentsModalOpen(false)}><span className="material-symbols-outlined text-slate-400">close</span></button>
+                    <button type="button" onClick={() => setInstallmentsModalOpen(false)}><span className="material-symbols-outlined text-slate-400">close</span></button>
                 </div>
                 <div className="overflow-y-auto p-4 flex flex-col gap-3 no-scrollbar">
                     {report?.activeInstallmentsList && report.activeInstallmentsList.length > 0 ? (
                         report.activeInstallmentsList.map(item => {
                             const isExpanded = expandedInstallmentId === item.id;
                             const hasFinancing = !!item.financingDetails;
-                            
-                            // Estimativa de saldo devedor
                             let remainingBalance = 0;
                             if (item.installmentTotal && item.installmentNumber) {
                                 const remainingMonths = item.installmentTotal - item.installmentNumber;
@@ -640,7 +652,7 @@ const BudgetsScreen: React.FC = () => {
             <div className="bg-white dark:bg-[#1e2330] w-full max-w-md rounded-2xl overflow-hidden shadow-2xl animate-[slide-up_0.3s] sm:animate-[scale-in_0.2s_ease-out] flex flex-col max-h-[85vh]" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center">
                     <h3 className="text-lg font-bold dark:text-white">Contas Fixas</h3>
-                    <button onClick={() => setFixedCostsModalOpen(false)}><span className="material-symbols-outlined text-slate-400">close</span></button>
+                    <button type="button" onClick={() => setFixedCostsModalOpen(false)}><span className="material-symbols-outlined text-slate-400">close</span></button>
                 </div>
                 <div className="overflow-y-auto p-4 flex flex-col gap-3 no-scrollbar">
                     {report?.fixedCostsList && report.fixedCostsList.length > 0 ? (
@@ -681,16 +693,16 @@ const BudgetsScreen: React.FC = () => {
                     </h3>
                     <div className="flex gap-2">
                         {selectedGoal.id && viewMode === 'details' && (
-                            <button onClick={() => setViewMode('edit')} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-500 hover:text-primary transition-colors">
+                            <button type="button" onClick={() => setViewMode('edit')} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-500 hover:text-primary transition-colors">
                                 <span className="material-symbols-outlined text-[20px]">edit</span>
                             </button>
                         )}
                         {viewMode === 'edit' && selectedGoal.id && (
-                            <button onClick={() => setViewMode('details')} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-500 hover:text-primary transition-colors">
+                            <button type="button" onClick={() => setViewMode('details')} className="p-2 bg-slate-100 dark:bg-slate-800 rounded-full text-slate-500 hover:text-primary transition-colors">
                                 <span className="material-symbols-outlined text-[20px]">visibility</span>
                             </button>
                         )}
-                        <button onClick={() => setGoalModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400">
+                        <button type="button" onClick={() => setGoalModalOpen(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full text-slate-400">
                             <span className="material-symbols-outlined text-[20px]">close</span>
                         </button>
                     </div>
@@ -769,6 +781,7 @@ const BudgetsScreen: React.FC = () => {
                                         />
                                     </div>
                                     <button 
+                                        type="button"
                                         onClick={handleDeposit}
                                         disabled={!depositAmountStr || isSubmittingGoal}
                                         className="px-6 bg-green-500 hover:bg-green-600 text-white font-bold rounded-xl shadow-lg shadow-green-500/30 active:scale-95 transition-all disabled:opacity-50 disabled:shadow-none"
@@ -806,7 +819,7 @@ const BudgetsScreen: React.FC = () => {
                                 <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Ícone</label>
                                 <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
                                     {ICONS.map(icon => (
-                                        <button key={icon} onClick={() => setGoalIcon(icon)} className={`p-2 rounded-lg shrink-0 transition-colors ${goalIcon === icon ? 'bg-primary text-white shadow-md' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
+                                        <button type="button" key={icon} onClick={() => setGoalIcon(icon)} className={`p-2 rounded-lg shrink-0 transition-colors ${goalIcon === icon ? 'bg-primary text-white shadow-md' : 'bg-slate-100 dark:bg-slate-800 text-slate-400'}`}>
                                             <span className="material-symbols-outlined text-[20px]">{icon}</span>
                                         </button>
                                     ))}
@@ -817,17 +830,17 @@ const BudgetsScreen: React.FC = () => {
                                 <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Cor</label>
                                 <div className="flex gap-3">
                                     {COLORS.map(c => (
-                                        <button key={c.id} onClick={() => setGoalColor(c.text)} className={`w-8 h-8 rounded-full transition-transform ${c.bg} ${goalColor === c.text ? `ring-2 ring-offset-2 dark:ring-offset-[#1e2330] scale-110 ${c.ring}` : ''}`}></button>
+                                        <button type="button" key={c.id} onClick={() => setGoalColor(c.text)} className={`w-8 h-8 rounded-full transition-transform ${c.bg} ${goalColor === c.text ? `ring-2 ring-offset-2 dark:ring-offset-[#1e2330] scale-110 ${c.ring}` : ''}`}></button>
                                     ))}
                                 </div>
                             </div>
 
-                            <button onClick={handleSaveGoal} disabled={isSubmittingGoal || !goalName || !goalTargetStr} className="w-full py-4 mt-2 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/30 disabled:opacity-50 active:scale-[0.98] transition-transform">
+                            <button type="button" onClick={handleSaveGoal} disabled={isSubmittingGoal || !goalName || !goalTargetStr} className="w-full py-4 mt-2 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/30 disabled:opacity-50 active:scale-[0.98] transition-transform">
                                 {isSubmittingGoal ? 'Salvando...' : 'Salvar Alterações'}
                             </button>
                             
                             {selectedGoal.id && (
-                                <button onClick={handleDeleteGoal} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-colors">
+                                <button type="button" onClick={handleDeleteGoal} className="w-full py-3 text-red-500 font-bold hover:bg-red-50 dark:hover:bg-red-900/10 rounded-xl transition-colors">
                                     Excluir Meta
                                 </button>
                             )}

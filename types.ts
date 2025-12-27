@@ -146,3 +146,41 @@ export interface BudgetReport {
   alertCategory: Category | null;
   goals: FinancialGoal[];
 }
+
+export interface AutomationSettings {
+  enabled: boolean;
+  detectIncome: boolean;
+  detectExpense: boolean;
+  activeApps: string[];
+}
+
+export interface SmartAlert {
+  id: string;
+  type: 'critical' | 'warning' | 'info';
+  title: string;
+  message: string;
+  relatedCategoryId?: string;
+  severity: number;
+}
+
+export interface ComparisonData {
+  currentIncome: number;
+  previousIncome: number;
+  incomeDiffPct: number;
+  currentExpense: number;
+  previousExpense: number;
+  expenseDiffPct: number;
+  topIncreaseCategory: { name: string; diff: number } | null;
+  topDecreaseCategory: { name: string; diff: number } | null;
+  insightText: string;
+}
+
+export interface FinancialScore {
+  score: number;
+  status: 'healthy' | 'stable' | 'attention' | 'critical';
+  factors: {
+    label: string;
+    impact: 'positive' | 'negative' | 'neutral';
+    value: string;
+  }[];
+}
