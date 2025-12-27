@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../services/database';
@@ -10,9 +11,6 @@ export const DataScreen: React.FC = () => {
   const [status, setStatus] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [showExportOptions, setShowExportOptions] = useState(false);
   
-  // SQL Migration State
-  const [showSql, setShowSql] = useState(false);
-
   useEffect(() => {
     db.getUserProfile().then(setProfile);
   }, []);
@@ -218,7 +216,8 @@ export const DataScreen: React.FC = () => {
   return (
     <div className="bg-background-light dark:bg-background-dark min-h-screen flex flex-col font-display relative">
        <header className="flex items-center p-4">
-        <button onClick={() => navigate(-1)} className="p-2"><span className="material-symbols-outlined dark:text-white">arrow_back</span></button>
+        {/* FIX: Usar rota explícita para evitar problema de histórico preso após redirecionamento */}
+        <button onClick={() => navigate('/profile')} className="p-2"><span className="material-symbols-outlined dark:text-white">arrow_back</span></button>
         <h1 className="text-lg font-bold dark:text-white ml-2">Dados e Backup</h1>
       </header>
       <main className="p-4 space-y-4">
@@ -295,87 +294,6 @@ export const DataScreen: React.FC = () => {
               )}
             </div>
           </div>
-        </div>
-
-        {/* --- DATABASE FIX TOOL --- */}
-        <div className="bg-yellow-50 dark:bg-yellow-900/10 p-4 rounded-xl border border-yellow-200 dark:border-yellow-900/30">
-            <div className="flex items-center justify-between mb-2">
-                <h3 className="font-bold text-yellow-700 dark:text-yellow-500 flex items-center gap-2">
-                    <span className="material-symbols-outlined">construction</span>
-                    Reparo do Banco
-                </h3>
-                <button onClick={() => setShowSql(!showSql)} className="text-xs font-bold uppercase text-yellow-600 dark:text-yellow-400 hover:underline">
-                    {showSql ? 'Ocultar' : 'Mostrar Instruções'}
-                </button>
-            </div>
-            <p className="text-xs text-yellow-800 dark:text-yellow-200/80 mb-2">
-                Se os dados aparecerem zerados ou com erro, execute este script no Supabase para garantir que as tabelas existem.
-            </p>
-            
-            {showSql && (
-                <div className="mt-2">
-                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mb-1">
-                        Copie o código abaixo e execute no <strong>SQL Editor</strong> do seu painel Supabase:
-                    </p>
-                    <div className="bg-slate-800 p-3 rounded-lg overflow-x-auto">
-                        <code className="text-[10px] font-mono text-green-400 block whitespace-pre select-all">
-{`-- 1. Create Wallets Table
-create table if not exists wallets (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references auth.users not null,
-  name text not null,
-  type text default 'account',
-  is_default boolean default false,
-  "order" integer default 0,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 2. Create Payment Methods Table
-create table if not exists payment_methods (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references auth.users not null,
-  name text not null,
-  "order" integer default 0,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 3. Create Goals Table
-create table if not exists financial_goals (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references auth.users not null,
-  name text not null,
-  target_amount numeric default 0,
-  current_amount numeric default 0,
-  deadline date,
-  icon text,
-  color_class text,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);
-
--- 4. Add Columns to Transactions
-alter table transactions add column if not exists wallet_id uuid references wallets(id);
-alter table transactions add column if not exists payment_method_id uuid references payment_methods(id);
-alter table transactions add column if not exists installment_number integer;
-alter table transactions add column if not exists installment_total integer;
-alter table transactions add column if not exists installment_group_id uuid;
-alter table transactions add column if not exists is_fixed boolean default false;
-
--- 5. Add Columns to Categories
-alter table categories add column if not exists budget numeric default 0;
-alter table categories add column if not exists budget_limit numeric default 0;
-
--- 6. Create Smart Rules
-create table if not exists smart_category_rules (
-  id uuid default uuid_generate_v4() primary key,
-  user_id uuid references auth.users not null,
-  keyword text not null,
-  category_id uuid references categories(id) not null,
-  created_at timestamp with time zone default timezone('utc'::text, now())
-);`}
-                        </code>
-                    </div>
-                </div>
-            )}
         </div>
 
       </main>
