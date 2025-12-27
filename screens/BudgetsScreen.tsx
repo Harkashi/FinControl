@@ -92,15 +92,19 @@ const BudgetsScreen: React.FC = () => {
     if (!editingCategory) return;
     setIsSavingBudget(true);
     
-    // Parse correto usando a função helper
     const limit = parseCurrency(newLimit);
+    const { success, error } = await db.updateCategoryBudget(editingCategory.id, limit);
     
-    // Mesmo que seja 0, permitimos para "remover" o limite
-    await db.updateCategoryBudget(editingCategory.id, limit);
-    
-    setEditingCategory(null);
     setIsSavingBudget(false);
-    await loadData(); // Recarrega os dados para atualizar a UI
+    
+    if (success) {
+        setEditingCategory(null);
+        // FORCE RELOAD
+        await loadData();
+    } else {
+        alert("Erro ao salvar orçamento. Tente novamente.");
+        console.error(error);
+    }
   };
 
   // --- SETTINGS MENU ACTIONS ---

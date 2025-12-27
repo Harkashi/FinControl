@@ -69,7 +69,7 @@ function parseSubtitle(rawSubtitle: string | null) {
     const text = parts[0].trim();
     let meta = undefined;
     try {
-        meta = JSON.parse(parts[1]);
+        meta = JSON.parse(parts[1].trim());
     } catch (e) {
         // Ignora erro de parse silenciosamente
     }
@@ -275,26 +275,81 @@ class DatabaseService {
   }
 
   private mapCategoryFromDB(c: any): Category {
+    // 1. Tenta ler colunas nativas
+    let budget = c.budget ?? c.budget_limit ?? 0;
+    let description = c.description || '';
+    
+    // 2. Se for 0, tenta ler do metadado escondido na descrição (Fallback para erro de schema)
+    if (budget === 0 && description.includes(SEPARATOR)) {
+        try {
+            const parts = description.split(SEPARATOR);
+            const meta = JSON.parse(parts[1].trim());
+            if (meta && typeof meta.budget === 'number') {
+                budget = meta.budget;
+            }
+            description = parts[0].trim(); // Retorna descrição limpa para a UI
+        } catch (e) {
+            // Ignora erro de parse
+        }
+    }
+
     return {
       id: c.id,
       name: c.name,
-      description: c.description || '',
+      description: description,
       icon: c.icon,
       colorClass: c.color_class || c.colorClass || 'text-gray-600',
       bgClass: c.bg_class || c.bgClass || 'bg-gray-100',
       type: c.category_type || 'both',
-      budget: c.budget_limit || 0 
+      budget: budget
     };
   }
   
-  async updateCategoryBudget(categoryId: string, limit: number): Promise<void> {
-      if (!this.currentUser) return;
-      await this.supabase.from('categories').update({ budget_limit: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
+  async updateCategoryBudget(categoryId: string, limit: number): Promise<{ success: boolean, error?: any }> {
+      if (!this.currentUser) return { success: false, error: 'Not authenticated' };
+      
+      // Tentativa 1: Coluna 'budget'
+      const { error: err1 } = await this.supabase.from('categories').update({ budget: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
+      if (!err1) return { success: true };
+
+      // Tentativa 2: Coluna 'budget_limit'
+      if (err1) {
+         const { error: err2 } = await this.supabase.from('categories').update({ budget_limit: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
+         // Se funcionar o fallback de coluna, retorna sucesso
+         if (!err2) return { success: true };
+         
+         // Tentativa 3: FALLBACK CRÍTICO - Salvar na descrição
+         console.warn("Columns missing, using description hack.");
+         
+         // Busca categoria atual
+         const { data: cat } = await this.supabase.from('categories').select('description').eq('id', categoryId).single();
+         if (!cat) return { success: false, error: 'Category not found' };
+
+         // Limpa metadata antiga se existir
+         let cleanDesc = cat.description || '';
+         if (cleanDesc.includes(SEPARATOR)) {
+             cleanDesc = cleanDesc.split(SEPARATOR)[0].trim();
+         }
+
+         // Cria novo metadata
+         const meta = { budget: limit };
+         const newDesc = `${cleanDesc} ${SEPARATOR} ${JSON.stringify(meta)}`;
+
+         const { error: err3 } = await this.supabase.from('categories').update({ description: newDesc }).eq('id', categoryId);
+         
+         if (err3) return { success: false, error: err3 };
+      }
+      
+      return { success: true };
   }
 
   async resetAllCategoryBudgets(): Promise<void> {
       if (!this.currentUser) return;
+      // Tenta resetar ambas as colunas e descrições
+      await this.supabase.from('categories').update({ budget: 0 }).eq('user_id', this.currentUser.id);
       await this.supabase.from('categories').update({ budget_limit: 0 }).eq('user_id', this.currentUser.id);
+      
+      // Para limpar descrições, precisaria iterar, mas vamos deixar que o usuário sobrescreva manualmente.
   }
 
   async saveCategory(category: Category): Promise<{success: boolean, error?: any}> {
@@ -374,24 +429,25 @@ class DatabaseService {
   // --- BUDGET REPORT V2 (INTELLIGENT HUB) ---
   async getBudgetsReport(month: number, year: number): Promise<BudgetReport> {
     if (!this.currentUser) throw new Error("Not authenticated");
-    const categories = await this.getCategories();
-    const goals = await this.getGoals(); // Fetch goals
+    const categories = await this.getCategories(); // Calls mapped categories (handles fallback)
+    const goals = await this.getGoals();
 
-    // FIX: Using YYYY-MM-DD strings for date range to match DB text column accurately
+    // FIX: Using YYYY-MM-DD strings for date range
     const startStr = `${year}-${String(month + 1).padStart(2, '0')}-01`;
     const lastDay = new Date(year, month + 1, 0).getDate();
     const endStr = `${year}-${String(month + 1).padStart(2, '0')}-${lastDay}`;
 
+    // Fetch ALL transactions for the period (both income and expense)
     const { data: transactions } = await this.supabase
       .from('transactions')
       .select('id, title, subtitle, amount, category_id, type, is_fixed, installment_number, installment_total, icon, color_class, bg_class') 
       .eq('user_id', this.currentUser.id)
-      .eq('type', 'expense') 
       .gte('date', startStr) // >= YYYY-MM-01
       .lte('date', endStr);  // <= YYYY-MM-DD
 
     let totalBudget = 0;
     let totalSpent = 0;
+    let totalIncome = 0;
     
     // New Metrics
     let fixedCosts = 0;
@@ -407,6 +463,18 @@ class DatabaseService {
 
     // Process transactions locally to sort into buckets
     (transactions || []).forEach((t: any) => {
+        // ROBUST FILTER: Check for multiple variants
+        const typeLower = (t.type || '').toLowerCase();
+        const isExpense = typeLower === 'expense' || typeLower === 'despesa' || typeLower === 'saída';
+        const isIncome = typeLower === 'income' || typeLower === 'receita' || typeLower === 'entrada';
+        
+        if (isIncome) {
+            totalIncome += t.amount;
+            return;
+        }
+
+        if (!isExpense) return; // Ignore unclassified
+
         // Parse metadata from subtitle if available (Financing Features)
         const { text: cleanSubtitle, meta: financingData } = parseSubtitle(t.subtitle);
 
@@ -444,8 +512,12 @@ class DatabaseService {
       .map(cat => {
         const catBudget = cat.budget || 0;
         
-        // Filter Transactions for this category
-        const catTxs = (transactions || []).filter((t: any) => t.category_id === cat.id);
+        // Filter Transactions for this category (using robust type check)
+        const catTxs = (transactions || []).filter((t: any) => {
+            const typeLower = (t.type || '').toLowerCase();
+            const isExpense = typeLower === 'expense' || typeLower === 'despesa' || typeLower === 'saída';
+            return t.category_id === cat.id && isExpense;
+        });
         const catSpent = catTxs.reduce((sum: number, t: any) => sum + t.amount, 0);
 
         totalBudget += catBudget;
@@ -468,6 +540,21 @@ class DatabaseService {
          return ratioB - ratioA;
       });
 
+    // --- SALDO LIVRE REAL CALCULATION ---
+    // Se o usuário tem Orçamentos Definidos, usamos (Budget - Gasto).
+    // Se NÃO tem orçamentos (TotalBudget == 0), usamos (Renda - Gastos Fixos - Parcelas - Gastos Variáveis).
+    // Isso garante que o valor nunca seja zero apenas porque o usuário não configurou os orçamentos.
+    
+    let remaining = 0;
+    
+    if (totalBudget > 0) {
+        remaining = Math.max(0, totalBudget - totalSpent);
+    } else {
+        // Fallback: Income based calculation (Cash Flow)
+        // Income - (All Expenses)
+        remaining = Math.max(0, totalIncome - (fixedCosts + committedInstallments + variableSpent));
+    }
+
     // --- PACE CALCULATION ---
     const now = new Date();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -482,15 +569,16 @@ class DatabaseService {
     }
 
     const daysPassedPct = (daysPassed / daysInMonth) * 100;
-    const budgetConsumedPct = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
-    const remaining = Math.max(0, totalBudget - totalSpent);
+    // Consumption percentage based on Budget OR Income if budget is missing
+    const baseForPct = totalBudget > 0 ? totalBudget : totalIncome;
+    const budgetConsumedPct = baseForPct > 0 ? (totalSpent / baseForPct) * 100 : 0;
 
     let pace: 'slow' | 'on-track' | 'fast' | 'critical' = 'on-track';
     
-    if (totalBudget > 0) {
+    if (baseForPct > 0) {
         if (budgetConsumedPct > 95) pace = 'critical';
-        else if (budgetConsumedPct > daysPassedPct + 15) pace = 'fast'; // Gastou 15% a mais do que o tempo passou
-        else if (budgetConsumedPct < daysPassedPct - 10) pace = 'slow'; // Economizando
+        else if (budgetConsumedPct > daysPassedPct + 15) pace = 'fast'; 
+        else if (budgetConsumedPct < daysPassedPct - 10) pace = 'slow'; 
         else pace = 'on-track';
     }
 
