@@ -85,7 +85,7 @@ const CategoriesScreen: React.FC = () => {
 
   const handleDelete = async () => {
     if (!editingId) return;
-    if (confirm('Tem certeza que deseja excluir esta categoria? As transações vinculadas a ela ficarão sem categoria.')) {
+    if (confirm('Tem certeza que deseja excluir esta categoria? Se houver transações vinculadas, elas serão movidas para outra categoria disponível.')) {
         if (loading) return; // Evita cliques duplos
         setLoading(true);
         

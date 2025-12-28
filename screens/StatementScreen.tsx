@@ -18,6 +18,14 @@ const StatementScreen: React.FC = () => {
   const [filteredTransactions, setFilteredTransactions] = useState<Transaction[]>([]);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   
+  // Rich Data for Export
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [methods, setMethods] = useState<PaymentMethod[]>([]);
+  
+  // User Plan State
+  const [userPlan, setUserPlan] = useState<'free' | 'pro' | 'ultra'>('free');
+  const [showExportOptions, setShowExportOptions] = useState(false);
+  
   const [balance, setBalance] = useState(0);
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -26,13 +34,20 @@ const StatementScreen: React.FC = () => {
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-      const [txs, wals] = await Promise.all([
+      const [txs, wals, cats, mets, profile] = await Promise.all([
         db.getTransactions(),
         db.getWallets(),
+        db.getCategories(),
+        db.getPaymentMethods(),
+        db.getUserProfile()
       ]);
 
       setTransactions(txs);
       setWallets(wals);
+      setCategories(cats);
+      setMethods(mets);
+      
+      if (profile) setUserPlan(profile.plan);
       
       applyFilters(txs, activeFilter);
       setLoading(false);
@@ -121,6 +136,124 @@ const StatementScreen: React.FC = () => {
       return `${parts[2]}/${parts[1]}/${parts[0]}`;
   };
 
+  // --- EXPORT LOGIC ---
+  const handleExportClick = () => {
+      if (userPlan === 'free') {
+          if(window.confirm('A exportação de extratos detalhados é um recurso exclusivo dos planos Pro e Ultra. Deseja conhecer os planos?')) {
+              navigate('/profile/plan');
+          }
+          return;
+      }
+      setShowExportOptions(true);
+  };
+
+  const getEnrichedData = () => {
+      const catMap = new Map(categories.map(c => [c.id, c.name]));
+      const walletMap = new Map(wallets.map(w => [w.id, w.name]));
+      const methodMap = new Map(methods.map(m => [m.id, m.name]));
+
+      return filteredTransactions.map(t => {
+        const d = new Date(t.date);
+        const adjustedDate = new Date(d.getTime() + d.getTimezoneOffset() * 60000);
+        return {
+            ...t,
+            dateFormatted: adjustedDate.toLocaleDateString('pt-BR'),
+            categoryName: catMap.get(t.categoryId || '') || 'Sem Categoria',
+            walletName: walletMap.get(t.walletId || '') || 'Conta Padrão',
+            methodName: methodMap.get(t.paymentMethodId || '') || 'Outros'
+        };
+      });
+  };
+
+  const exportExcel = () => {
+      const data = getEnrichedData();
+      const headers = ['Data', 'Descrição', 'Valor', 'Tipo', 'Categoria', 'Conta', 'Método'];
+      const rows = data.map(t => [
+          t.dateFormatted,
+          `"${t.title.replace(/"/g, '""')}"`,
+          t.amount.toFixed(2).replace('.', ','),
+          t.type === 'income' ? 'Receita' : 'Despesa',
+          `"${t.categoryName}"`,
+          `"${t.walletName}"`,
+          `"${t.methodName}"`
+      ]);
+      const csvContent = [headers.join(';'), ...rows.map(r => r.join(';'))].join('\n');
+      const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `extrato_${new Date().toISOString().split('T')[0]}.csv`;
+      a.click();
+      setShowExportOptions(false);
+  };
+
+  const exportPDF = () => {
+    const data = getEnrichedData();
+    const totalIncome = data.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : 0), 0);
+    const totalExpense = data.reduce((acc, t) => acc + (t.type === 'expense' ? t.amount : 0), 0);
+    const totalBalance = totalIncome - totalExpense;
+
+    const printWindow = window.open('', '', 'height=800,width=900');
+    if (printWindow) {
+      printWindow.document.write(`
+        <!DOCTYPE html>
+        <html lang="pt-BR">
+          <head>
+            <title>Extrato - FinControl</title>
+            <meta charset="utf-8">
+            <style>
+              @page { size: A4; margin: 15mm; }
+              body { font-family: 'Helvetica', 'Arial', sans-serif; padding: 20px; color: #1e293b; max-width: 800px; margin: 0 auto; }
+              .header { margin-bottom: 30px; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; display: flex; justify-content: space-between; }
+              .header h1 { margin: 0; font-size: 24px; color: #0f172a; }
+              .summary { display: flex; gap: 10px; margin-bottom: 20px; }
+              .card { flex: 1; padding: 10px; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; }
+              .card h3 { margin: 0 0 5px; font-size: 10px; text-transform: uppercase; color: #64748b; }
+              .card p { margin: 0; font-weight: bold; font-size: 16px; }
+              table { width: 100%; border-collapse: collapse; font-size: 11px; }
+              th { text-align: left; padding: 8px; background: #f1f5f9; border-bottom: 2px solid #cbd5e1; }
+              td { padding: 8px; border-bottom: 1px solid #e2e8f0; }
+              .text-right { text-align: right; }
+              .income { color: #16a34a; font-weight: bold; }
+              .expense { color: #dc2626; font-weight: bold; }
+              .badge { background: #f1f5f9; padding: 2px 4px; border-radius: 4px; font-size: 10px; display: inline-block; }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <div><h1>FinControl</h1><p>Extrato de Transações</p></div>
+              <div style="text-align: right;"><p>${new Date().toLocaleDateString('pt-BR')}</p></div>
+            </div>
+            <div class="summary">
+               <div class="card"><h3>Entradas</h3><p class="income">R$ ${totalIncome.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p></div>
+               <div class="card"><h3>Saídas</h3><p class="expense">R$ ${totalExpense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p></div>
+               <div class="card"><h3>Resultado</h3><p>R$ ${totalBalance.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p></div>
+            </div>
+            <table>
+              <thead><tr><th>Data</th><th>Descrição</th><th>Categoria</th><th>Conta</th><th class="text-right">Valor</th></tr></thead>
+              <tbody>
+                ${data.map(t => `
+                  <tr>
+                    <td>${t.dateFormatted}</td>
+                    <td><b>${t.title}</b><br/><span style="color:#64748b;font-size:10px">${t.subtitle || ''}</span></td>
+                    <td><span class="badge">${t.categoryName}</span></td>
+                    <td>${t.walletName}</td>
+                    <td class="text-right ${t.type === 'income' ? 'income' : 'expense'}">
+                      ${t.type === 'expense' ? '-' : '+'} R$ ${t.amount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+            <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 500); }</script>
+          </body>
+        </html>
+      `);
+      printWindow.document.close();
+    }
+    setShowExportOptions(false);
+  };
+
   return (
     <div className="bg-background-light dark:bg-background-dark min-h-screen flex flex-col font-display pb-24">
       {/* Header */}
@@ -131,6 +264,12 @@ const StatementScreen: React.FC = () => {
             </button>
             <h1 className="text-lg font-bold dark:text-white">Extrato</h1>
          </div>
+         <button 
+            onClick={handleExportClick}
+            className={`w-10 h-10 flex items-center justify-center rounded-full transition-colors ${userPlan === 'free' ? 'bg-slate-100 dark:bg-white/5 text-slate-400' : 'bg-primary/10 text-primary hover:bg-primary/20'}`}
+         >
+            <span className="material-symbols-outlined">{userPlan === 'free' ? 'lock' : 'download'}</span>
+         </button>
       </header>
 
       {/* Balance Card & Chart */}
@@ -242,6 +381,37 @@ const StatementScreen: React.FC = () => {
              })
          )}
       </div>
+
+      {/* Export Options Modal */}
+      {showExportOptions && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm px-4" onClick={() => setShowExportOptions(false)}>
+           <div className="w-full max-w-sm bg-white dark:bg-[#192233] rounded-t-2xl sm:rounded-2xl p-4 animate-[slide-up_0.3s]" onClick={e => e.stopPropagation()}>
+              <h3 className="text-lg font-bold dark:text-white mb-4 px-2">Baixar Extrato</h3>
+              <p className="text-xs text-slate-500 mb-4 px-2">O arquivo incluirá apenas as transações filtradas atualmente na tela.</p>
+              <div className="flex flex-col gap-2">
+                 <button onClick={exportExcel} className="flex items-center gap-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-green-50 dark:hover:bg-green-900/20 group transition-colors">
+                    <div className="w-10 h-10 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600">
+                      <span className="material-symbols-outlined">table_view</span>
+                    </div>
+                    <div className="text-left">
+                       <p className="font-bold text-slate-900 dark:text-white group-hover:text-green-700 dark:group-hover:text-green-400">Excel (CSV)</p>
+                       <p className="text-xs text-slate-500">Para planilhas e análise de dados</p>
+                    </div>
+                 </button>
+                 <button onClick={exportPDF} className="flex items-center gap-3 p-4 rounded-xl bg-slate-50 dark:bg-slate-800 hover:bg-red-50 dark:hover:bg-red-900/20 group transition-colors">
+                    <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center text-red-600">
+                      <span className="material-symbols-outlined">picture_as_pdf</span>
+                    </div>
+                    <div className="text-left">
+                       <p className="font-bold text-slate-900 dark:text-white group-hover:text-red-700 dark:group-hover:text-red-400">PDF (Impressão)</p>
+                       <p className="text-xs text-slate-500">Visual, pronto para imprimir</p>
+                    </div>
+                 </button>
+              </div>
+              <button onClick={() => setShowExportOptions(false)} className="w-full mt-4 py-3 font-bold text-slate-500 dark:text-slate-400">Cancelar</button>
+           </div>
+        </div>
+      )}
 
       <BottomNav />
     </div>

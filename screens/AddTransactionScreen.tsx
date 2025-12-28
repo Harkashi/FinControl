@@ -35,7 +35,7 @@ const AddTransactionScreen: React.FC = () => {
   const [type, setType] = useState<'income' | 'expense' | 'transfer'>(() => state?.type || 'income');
   
   // FIX: Ensure amount is initialized as string to avoid .replace crash
-  const [amount, setAmount] = useState(() => {
+  const [amount, setAmount] = useState<string>(() => {
     if (state?.amount !== undefined && state?.amount !== null) {
       // If it's a number (from edit mode), format it to "1.234,56"
       if (typeof state.amount === 'number') {
@@ -95,8 +95,10 @@ const AddTransactionScreen: React.FC = () => {
   // Effect para recalcular parcelas
   useEffect(() => {
     if (isSmartCalc && hasInterest && monthlyInterestRate && amount && installments > 0) {
-        const principal = parseFloat(amount.replace(/\./g, '').replace(',', '.'));
-        const rate = parseFloat(monthlyInterestRate.replace(',', '.')) / 100;
+        const amountStr = String(amount);
+        const principal = parseFloat(amountStr.replace(/\./g, '').replace(',', '.'));
+        const rateStr = String(monthlyInterestRate);
+        const rate = parseFloat(rateStr.replace(',', '.')) / 100;
         
         if (!isNaN(principal) && !isNaN(rate) && principal > 0) {
             // Tabela Price: PMT = PV * (i * (1+i)^n) / ((1+i)^n - 1)
@@ -144,7 +146,8 @@ const AddTransactionScreen: React.FC = () => {
     let financingData = undefined;
 
     // Helper safely converting string amount to float
-    const parseAmount = (val: string) => {
+    const parseAmount = (val: string | number) => {
+       if (typeof val === 'number') return val;
        if (typeof val !== 'string') return 0;
        return parseFloat(val.replace(/\./g, '').replace(',', '.'));
     };
@@ -152,7 +155,7 @@ const AddTransactionScreen: React.FC = () => {
     if (isSmartCalc && hasInterest && calculatedInstallment > 0) {
         cleanAmount = calculatedInstallment;
         financingData = {
-            interestRate: parseFloat(monthlyInterestRate.replace(',', '.')),
+            interestRate: parseFloat(String(monthlyInterestRate).replace(',', '.')),
             loanAmount: parseAmount(amount),
             totalInterest: (calculatedInstallment * installments) - parseAmount(amount)
         };
@@ -204,6 +207,7 @@ const AddTransactionScreen: React.FC = () => {
         if (navigator.vibrate) navigator.vibrate(50);
         navigate('/dashboard');
     } catch (error) {
+        console.error(error);
         setIsSubmitting(false);
         setSaveError('Erro ao salvar. Tente novamente.');
     }
@@ -221,7 +225,7 @@ const AddTransactionScreen: React.FC = () => {
         if (hasInterest && totalWithInterest && !isSmartCalc) {
             return parseFloat(totalWithInterest.replace(/\./g, '').replace(',', '.'));
         }
-        return parseFloat(amount.replace(/\./g, '').replace(',', '.') || '0');
+        return parseFloat(String(amount).replace(/\./g, '').replace(',', '.') || '0');
       } catch (e) { return 0; }
   };
   const finalTotalManual = getDisplayTotal();

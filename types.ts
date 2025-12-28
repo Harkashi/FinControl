@@ -76,8 +76,8 @@ export interface UserProfile {
   email: string;
   plan: 'free' | 'pro' | 'ultra';
   created_at: string;
-  theme: 'dark' | 'light' | 'amoled';
-  accent_color: 'blue' | 'purple' | 'orange' | 'green';
+  theme: 'dark' | 'light' | 'amoled' | 'slate' | 'midnight';
+  accent_color: 'blue' | 'purple' | 'orange' | 'green' | 'pink' | 'cyan' | 'red' | 'yellow' | 'indigo';
   chart_style: 'detailed' | 'minimal';
   avatar_url?: string;
 }

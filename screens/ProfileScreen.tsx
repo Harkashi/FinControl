@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../services/database';
@@ -165,6 +166,8 @@ const ProfileScreen: React.FC = () => {
   const progressPercent = calculateProgress(stats.totalTransactions);
   const nextLevel = currentLevel + 1;
 
+  const isFree = profile?.plan === 'free';
+
   if (loading) return <div className="min-h-screen bg-background-light dark:bg-background-dark flex items-center justify-center"><div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin"></div></div>;
 
   return (
@@ -294,7 +297,7 @@ const ProfileScreen: React.FC = () => {
         </div>
 
         {/* Upgrade Banner (Visible only if Free) */}
-        {profile?.plan === 'free' && (
+        {isFree && (
           <div 
             onClick={() => navigate('/profile/plan')}
             className="w-full relative overflow-hidden rounded-2xl bg-gradient-to-r from-yellow-400 to-orange-500 p-5 cursor-pointer shadow-lg shadow-orange-500/20 group"
@@ -352,10 +355,11 @@ const ProfileScreen: React.FC = () => {
            <SettingsItem 
             icon="auto_awesome" 
             title="Regras Inteligentes" 
-            subtitle="Categorização automática"
+            subtitle={isFree ? "Recurso Premium" : "Categorização automática"}
             onClick={() => navigate('/profile/smart-rules')}
             iconBg="bg-indigo-100 dark:bg-indigo-500/10" 
             iconColor="text-indigo-600 dark:text-indigo-400"
+            rightElement={isFree ? <span className="material-symbols-outlined text-slate-400 text-[18px]">lock</span> : undefined}
           />
         </SettingsSection>
 

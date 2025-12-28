@@ -35,7 +35,9 @@ export const DataScreen: React.FC = () => {
   // 3. Exportar Excel ou PDF (Lógica Pro)
   const handleExportRichClick = () => {
      if (!isPro) {
-       navigate('/profile/plan');
+       if (confirm('A exportação em Excel e PDF é exclusiva para assinantes Premium (Pro e Ultra). Deseja ver os planos?')) {
+           navigate('/profile/plan');
+       }
        return;
      }
      setShowExportOptions(true);
@@ -252,7 +254,7 @@ export const DataScreen: React.FC = () => {
                <span className="material-symbols-outlined text-green-600">table_view</span>
                <div className="text-left">
                  <p className="font-bold dark:text-white text-sm">Exportar Excel / PDF</p>
-                 <p className="text-xs text-slate-400">{isPro ? 'Disponível' : 'Exclusivo PRO'}</p>
+                 <p className="text-xs text-slate-400">{isPro ? 'Disponível' : 'Exclusivo Premium'}</p>
                </div>
              </div>
              {isPro ? (

@@ -1,14 +1,15 @@
+
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { db } from '../services/database';
 import { UserProfile } from '../types';
 
 interface ThemeContextType {
-  theme: 'light' | 'dark' | 'amoled';
-  accentColor: 'blue' | 'purple' | 'orange' | 'green';
+  theme: 'light' | 'dark' | 'amoled' | 'slate' | 'midnight';
+  accentColor: 'blue' | 'purple' | 'orange' | 'green' | 'pink' | 'cyan' | 'red' | 'yellow' | 'indigo';
   privacyMode: boolean;
   chartStyle: 'detailed' | 'minimal';
-  setTheme: (theme: 'light' | 'dark' | 'amoled') => Promise<void>;
-  setAccentColor: (color: 'blue' | 'purple' | 'orange' | 'green') => Promise<void>;
+  setTheme: (theme: 'light' | 'dark' | 'amoled' | 'slate' | 'midnight') => Promise<void>;
+  setAccentColor: (color: 'blue' | 'purple' | 'orange' | 'green' | 'pink' | 'cyan' | 'red' | 'yellow' | 'indigo') => Promise<void>;
   setChartStyle: (style: 'detailed' | 'minimal') => Promise<void>;
   setPrivacyMode: (enabled: boolean) => void;
 }
@@ -27,8 +28,8 @@ const ThemeContext = createContext<ThemeContextType>({
 export const useTheme = () => useContext(ThemeContext);
 
 export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [theme, setThemeState] = useState<'light' | 'dark' | 'amoled'>('dark');
-  const [accentColor, setAccentColorState] = useState<'blue' | 'purple' | 'orange' | 'green'>('blue');
+  const [theme, setThemeState] = useState<'light' | 'dark' | 'amoled' | 'slate' | 'midnight'>('dark');
+  const [accentColor, setAccentColorState] = useState<'blue' | 'purple' | 'orange' | 'green' | 'pink' | 'cyan' | 'red' | 'yellow' | 'indigo'>('blue');
   const [chartStyle, setChartStyleState] = useState<'detailed' | 'minimal'>('detailed');
   const [privacyMode, setPrivacyModeState] = useState(false);
 
@@ -42,8 +43,8 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (savedPrivacy) setPrivacyModeState(JSON.parse(savedPrivacy));
       
-      let currentTheme = (savedTheme as 'light' | 'dark' | 'amoled') || 'dark';
-      let currentAccent = (savedAccent as 'blue' | 'purple' | 'orange' | 'green') || 'blue';
+      let currentTheme = (savedTheme as any) || 'dark';
+      let currentAccent = (savedAccent as any) || 'blue';
       let currentChartStyle = (savedChartStyle as 'detailed' | 'minimal') || 'detailed';
 
       // Apply immediately
@@ -56,7 +57,6 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       try {
         const profile = await db.getUserProfile();
         if (profile) {
-          let hasUpdates = false;
           // Sync Theme/Accent
           if (profile.theme !== currentTheme || profile.accent_color !== currentAccent || profile.chart_style !== currentChartStyle) {
              setThemeState(profile.theme);
@@ -87,14 +87,25 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       root.classList.add('dark', 'amoled');
       // Set to absolute black
       root.style.setProperty('--bg-dark', '#000000');
-      root.style.setProperty('--surface-dark', '#000000'); // Cards also black or very dark
+      root.style.setProperty('--surface-dark', '#000000'); 
+    } else if (t === 'midnight') {
+      root.classList.add('dark');
+      // Deep Blue/Slate
+      root.style.setProperty('--bg-dark', '#0f172a'); // Slate 900
+      root.style.setProperty('--surface-dark', '#1e293b'); // Slate 800
+    } else if (t === 'slate') {
+      root.classList.add('dark');
+      // True Dark Gray (Zinc)
+      root.style.setProperty('--bg-dark', '#18181b'); // Zinc 950
+      root.style.setProperty('--surface-dark', '#27272a'); // Zinc 900
     } else if (t === 'dark') {
       root.classList.add('dark');
-      // Set to standard dark blue/grey
+      // Default: Blue-Grey
       root.style.setProperty('--bg-dark', '#101622');
       root.style.setProperty('--surface-dark', '#192233');
     } else {
       // Light mode defaults handle themselves via Tailwind classes
+      root.classList.remove('dark');
       root.style.removeProperty('--bg-dark');
       root.style.removeProperty('--surface-dark');
     }
@@ -105,6 +116,11 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       purple: { primary: '147 51 234', dark: '126 34 206' }, // #9333ea
       orange: { primary: '249 115 22', dark: '234 88 12' }, // #f97316
       green: { primary: '22 163 74', dark: '21 128 61' }, // #16a34a
+      pink: { primary: '236 72 153', dark: '219 39 119' }, // #ec4899 (Pink-500)
+      cyan: { primary: '6 182 212', dark: '8 145 178' }, // #06b6d4 (Cyan-500)
+      red: { primary: '239 68 68', dark: '220 38 38' }, // #ef4444 (Red-500)
+      yellow: { primary: '234 179 8', dark: '202 138 4' }, // #eab308 (Yellow-500)
+      indigo: { primary: '99 102 241', dark: '79 70 229' }, // #6366f1 (Indigo-500)
     };
 
     const selected = colorMap[c as keyof typeof colorMap] || colorMap.blue;
@@ -112,14 +128,14 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     root.style.setProperty('--color-primary-dark', selected.dark);
   };
 
-  const setTheme = async (newTheme: 'light' | 'dark' | 'amoled') => {
+  const setTheme = async (newTheme: 'light' | 'dark' | 'amoled' | 'slate' | 'midnight') => {
     setThemeState(newTheme);
     applyDOMTheme(newTheme, accentColor);
     localStorage.setItem('fincontrol_theme', newTheme);
     await db.updateUserProfile({ theme: newTheme });
   };
 
-  const setAccentColor = async (newColor: 'blue' | 'purple' | 'orange' | 'green') => {
+  const setAccentColor = async (newColor: any) => {
     setAccentColorState(newColor);
     applyDOMTheme(theme, newColor);
     localStorage.setItem('fincontrol_accent', newColor);

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../services/database';
@@ -10,6 +11,7 @@ const SmartRulesScreen: React.FC = () => {
   const [keyword, setKeyword] = useState('');
   const [categoryId, setCategoryId] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isPremium, setIsPremium] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -17,10 +19,19 @@ const SmartRulesScreen: React.FC = () => {
 
   const loadData = async () => {
     setLoading(true);
-    const r = await db.getSmartRules();
-    const c = await db.getCategories();
+    const [r, c, p] = await Promise.all([
+        db.getSmartRules(),
+        db.getCategories(),
+        db.getUserProfile()
+    ]);
+    
     setRules(r);
     setCategories(c);
+    
+    if (p && (p.plan === 'pro' || p.plan === 'ultra')) {
+        setIsPremium(true);
+    }
+    
     setLoading(false);
   };
 
@@ -39,6 +50,42 @@ const SmartRulesScreen: React.FC = () => {
     const r = await db.getSmartRules();
     setRules(r);
   };
+
+  if (!loading && !isPremium) {
+      return (
+        <div className="bg-background-light dark:bg-background-dark min-h-screen flex flex-col font-display">
+            <header className="flex items-center p-4">
+                <button onClick={() => navigate(-1)} className="p-2"><span className="material-symbols-outlined dark:text-white">arrow_back</span></button>
+                <h1 className="text-lg font-bold dark:text-white ml-2">Automação</h1>
+            </header>
+            <main className="flex-1 flex flex-col items-center justify-center p-6 text-center pb-20 animate-[fade-in_0.5s]">
+                <div className="w-24 h-24 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-full flex items-center justify-center shadow-2xl shadow-indigo-500/40 mb-8 relative">
+                    <span className="material-symbols-outlined text-white text-5xl">auto_awesome</span>
+                    <div className="absolute -bottom-2 -right-2 bg-white dark:bg-[#1e2330] rounded-full p-2 shadow-sm">
+                        <span className="material-symbols-outlined text-slate-900 dark:text-white text-[20px]">lock</span>
+                    </div>
+                </div>
+                
+                <h2 className="text-2xl font-extrabold text-slate-900 dark:text-white mb-3">
+                    Inteligência Artificial
+                </h2>
+                <p className="text-slate-500 dark:text-slate-400 mb-8 max-w-xs leading-relaxed text-sm">
+                    Automatize a categorização das suas despesas e deixe o FinControl organizar tudo para você.
+                    <br/><br/>
+                    <span className="font-bold text-indigo-500">Exclusivo para planos Pro e Ultra.</span>
+                </p>
+
+                <button 
+                    onClick={() => navigate('/profile/plan')}
+                    className="w-full max-w-xs py-4 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold rounded-2xl shadow-lg shadow-indigo-500/25 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                >
+                    <span className="material-symbols-outlined">diamond</span>
+                    Desbloquear Agora
+                </button>
+            </main>
+        </div>
+      );
+  }
 
   return (
     <div className="bg-background-light dark:bg-background-dark min-h-screen flex flex-col font-display">

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../services/database';
@@ -7,9 +8,18 @@ import { SwitchItem } from '../../components/SettingsComponents';
 const NotificationScreen: React.FC = () => {
   const navigate = useNavigate();
   const [settings, setSettings] = useState<NotificationSettings | null>(null);
+  const [userPlan, setUserPlan] = useState<'free' | 'pro' | 'ultra'>('free');
 
   useEffect(() => {
-    db.getNotificationSettings().then(setSettings);
+    const load = async () => {
+        const [s, p] = await Promise.all([
+            db.getNotificationSettings(),
+            db.getUserProfile()
+        ]);
+        setSettings(s);
+        if (p) setUserPlan(p.plan);
+    };
+    load();
   }, []);
 
   const requestPermission = async () => {
@@ -21,8 +31,19 @@ const NotificationScreen: React.FC = () => {
     }
   };
 
+  const isPremium = userPlan === 'pro' || userPlan === 'ultra';
+
   const toggle = async (key: keyof NotificationSettings) => {
     if (!settings) return;
+
+    // Bloqueio Premium para Alertas de Orçamento
+    if (key === 'alert_limit' && !isPremium) {
+        if(confirm('Alertas de orçamento são exclusivos para planos Premium. Deseja ver os planos?')) {
+            navigate('/profile/plan');
+        }
+        return;
+    }
+
     const newVal = !settings[key];
     
     // Se estiver ativando, pedir permissão
@@ -51,7 +72,10 @@ const NotificationScreen: React.FC = () => {
         {/* Toggles */}
         <div className="bg-white dark:bg-[#192233] rounded-xl overflow-hidden shadow-sm">
            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">
-             <span className="dark:text-white font-medium text-sm">Alertar Limites de Orçamento</span>
+             <div className="flex items-center gap-2">
+                <span className={`font-medium text-sm ${!isPremium ? 'text-slate-500' : 'dark:text-white'}`}>Alertar Limites de Orçamento</span>
+                {!isPremium && <span className="material-symbols-outlined text-[16px] text-slate-400">lock</span>}
+             </div>
              <SwitchItem checked={settings?.alert_limit ?? false} onChange={() => toggle('alert_limit')} />
            </div>
            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800">

@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import WelcomeScreen from './screens/WelcomeScreen';
@@ -18,6 +19,7 @@ import NotificationScreen from './screens/profile/NotificationScreen';
 import WalletsScreen from './screens/WalletsScreen';
 import MethodsScreen from './screens/MethodsScreen';
 import ShortcutsScreen from './screens/ShortcutsScreen';
+import ComparisonScreen from './screens/reports/ComparisonScreen';
 
 import { db } from './services/database';
 import { ThemeProvider } from './components/ThemeHandler';
@@ -82,6 +84,7 @@ const App: React.FC = () => {
                 <Route path="/categories" element={<ProtectedRoute><CategoriesScreen /></ProtectedRoute>} />
                 <Route path="/wallets" element={<ProtectedRoute><WalletsScreen /></ProtectedRoute>} />
                 <Route path="/methods" element={<ProtectedRoute><MethodsScreen /></ProtectedRoute>} />
+                <Route path="/reports/comparison" element={<ProtectedRoute><ComparisonScreen /></ProtectedRoute>} />
                 
                 {/* Profile & Settings Routes */}
                 <Route path="/profile" element={<ProtectedRoute><ProfileScreen /></ProtectedRoute>} />

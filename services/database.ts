@@ -501,55 +501,78 @@ class DatabaseService {
     try {
         const userId = this.currentUser.id;
 
-        // 1. Tentar apagar regras inteligentes associadas
-        try {
-            await this.supabase.from('smart_category_rules').delete().eq('category_id', id);
-        } catch (e) { console.warn("Erro ao apagar regras (não crítico):", e); }
+        // 1. Limpar regras inteligentes (se houver)
+        // Isso remove dependencias na tabela auxiliar
+        const { error: ruleError } = await this.supabase.from('smart_category_rules').delete().eq('category_id', id);
+        if (ruleError) console.warn("Erro ao limpar regras inteligentes:", ruleError);
 
-        // 2. Lidar com Transações Vinculadas
-        // Tenta setar NULL primeiro (padrão)
-        const { error: updateNullError } = await this.supabase.from('transactions').update({ category_id: null }).eq('category_id', id);
+        // 2. Verificar se existem transações vinculadas
+        const { count, error: countError } = await this.supabase
+            .from('transactions')
+            .select('*', { count: 'exact', head: true })
+            .eq('category_id', id);
         
-        // Se falhar (ex: coluna NOT NULL ou erro de RLS), tentamos migrar para outra categoria
-        if (updateNullError) {
-             console.warn("Não foi possível desvincular categoria (provável NOT NULL). Tentando migrar para outra...", updateNullError);
-             
-             // Busca qualquer outra categoria do usuário para servir de "Lixeira/Geral"
-             const { data: otherCats } = await this.supabase.from('categories').select('id').eq('user_id', userId).neq('id', id).limit(1);
-             
-             if (otherCats && otherCats.length > 0) {
-                 const fallbackId = otherCats[0].id;
-                 const { error: moveError } = await this.supabase.from('transactions').update({ category_id: fallbackId }).eq('category_id', id);
-                 if (moveError) {
-                     return { success: false, error: `Erro ao migrar transações para outra categoria: ${moveError.message}` };
-                 }
-             } else {
-                 // Se não tem para onde mover e não pode ser null, impede a exclusão
-                 return { success: false, error: "Não é possível excluir esta categoria pois ela possui transações e não há outra categoria para recebê-las." };
-             }
-        }
+        if (countError) throw countError;
 
-        // 3. Excluir a Categoria
-        const { error: deleteError } = await this.supabase.from('categories').delete().eq('id', id);
-        
-        if (deleteError) {
-            // Se ainda der erro de chave estrangeira (FK), tentamos forçar a migração novamente
-            if (deleteError.code === '23503') {
-                 const { data: otherCats } = await this.supabase.from('categories').select('id').eq('user_id', userId).neq('id', id).limit(1);
-                 if (otherCats && otherCats.length > 0) {
-                     await this.supabase.from('transactions').update({ category_id: otherCats[0].id }).eq('category_id', id);
-                     const { error: retryError } = await this.supabase.from('categories').delete().eq('id', id);
-                     if (retryError) return { success: false, error: retryError.message };
-                     return { success: true };
-                 }
-                 return { success: false, error: "Erro de dependência: Existem dados vinculados a esta categoria que o sistema não conseguiu remover." };
+        if (count !== null && count > 0) {
+            // PRECISAMOS MIGRAR.
+            let targetCatId = null;
+            
+            // Tenta encontrar uma categoria existente "Geral", "Outros", etc.
+            const { data: candidates } = await this.supabase
+                .from('categories')
+                .select('id, name')
+                .eq('user_id', userId)
+                .neq('id', id); // Não pode ser a própria
+            
+            if (candidates && candidates.length > 0) {
+                // Tenta achar uma com nome comum
+                const preferred = candidates.find(c => ['geral', 'outros', 'general', 'diversos'].includes(c.name.toLowerCase()));
+                targetCatId = preferred ? preferred.id : candidates[0].id;
+            } else {
+                // Se não tem NENHUMA outra categoria, CRIA uma "Geral"
+                const { data: newCat, error: createError } = await this.supabase
+                    .from('categories')
+                    .insert({
+                        user_id: userId,
+                        name: 'Geral',
+                        icon: 'category',
+                        color_class: 'text-slate-500',
+                        bg_class: 'bg-slate-100',
+                        category_type: 'both'
+                    })
+                    .select()
+                    .single();
+                
+                if (createError || !newCat) {
+                    throw new Error("Não foi possível criar uma categoria de destino para as transações existentes.");
+                }
+                targetCatId = newCat.id;
             }
-            return { success: false, error: deleteError.message };
+
+            // Migrar transações para a categoria alvo
+            const { error: moveError } = await this.supabase
+                .from('transactions')
+                .update({ category_id: targetCatId })
+                .eq('category_id', id);
+            
+            if (moveError) {
+                throw new Error(`Erro ao mover transações para categoria de backup: ${moveError.message}`);
+            }
         }
+
+        // 3. Excluir a categoria original
+        const { error: deleteError } = await this.supabase
+            .from('categories')
+            .delete()
+            .eq('id', id);
+
+        if (deleteError) throw deleteError;
         
         return { success: true };
     } catch (e: any) {
-        return { success: false, error: e.message || "Erro desconhecido ao excluir categoria." };
+        console.error("Delete Category Failed:", e);
+        return { success: false, error: e.message || "Erro desconhecido ao excluir." };
     }
   }
 
@@ -756,6 +779,87 @@ class DatabaseService {
     }
 
     return { total, income, expense };
+  }
+
+  // --- NEW: Detailed Comparison Report ---
+  async getDetailedComparison(month: number, year: number): Promise<any> {
+      try {
+          const transactions = await this.getTransactions();
+          const categories = await this.getCategories();
+          
+          // Dates
+          const currentMonth = month;
+          const currentYear = year;
+          const prevDate = new Date(year, month - 1, 1);
+          const prevMonth = prevDate.getMonth();
+          const prevYear = prevDate.getFullYear();
+
+          const currentMap: Record<string, number> = {};
+          const prevMap: Record<string, number> = {};
+          
+          let currentTotal = 0;
+          let prevTotal = 0;
+
+          transactions.forEach(t => {
+              if (t.type !== 'expense') return; // Only expenses for now
+              
+              const d = new Date(t.date);
+              const adj = new Date(d.getTime() + d.getTimezoneOffset() * 60000);
+              
+              // Current
+              if (adj.getMonth() === currentMonth && adj.getFullYear() === currentYear) {
+                  currentTotal += t.amount;
+                  if (t.categoryId) {
+                      currentMap[t.categoryId] = (currentMap[t.categoryId] || 0) + t.amount;
+                  }
+              }
+              
+              // Previous
+              if (adj.getMonth() === prevMonth && adj.getFullYear() === prevYear) {
+                  prevTotal += t.amount;
+                  if (t.categoryId) {
+                      prevMap[t.categoryId] = (prevMap[t.categoryId] || 0) + t.amount;
+                  }
+              }
+          });
+
+          // Aggregate
+          const comparisonList = categories
+            .filter(c => c.type === 'expense' || c.type === 'both')
+            .map(c => {
+                const current = currentMap[c.id] || 0;
+                const previous = prevMap[c.id] || 0;
+                const diff = current - previous;
+                const percent = previous > 0 ? (diff / previous) * 100 : current > 0 ? 100 : 0;
+                
+                return {
+                    id: c.id,
+                    name: c.name,
+                    icon: c.icon,
+                    bgClass: c.bgClass,
+                    colorClass: c.colorClass,
+                    current,
+                    previous,
+                    diff,
+                    percent
+                };
+            })
+            // Filter out categories with no activity in BOTH months
+            .filter(item => item.current > 0 || item.previous > 0)
+            .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff)); // Sort by impact (absolute change)
+
+          return {
+              currentTotal,
+              prevTotal,
+              diffValue: currentTotal - prevTotal,
+              diffPct: prevTotal > 0 ? ((currentTotal - prevTotal) / prevTotal) * 100 : 0,
+              categories: comparisonList
+          };
+
+      } catch (error) {
+          console.error("Comparison report failed", error);
+          return null;
+      }
   }
 
   // --- AUTOMATION SETTINGS ---

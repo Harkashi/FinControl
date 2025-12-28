@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useMemo } from 'react';
 import { BarChart, Bar, XAxis, Tooltip, CartesianGrid, ResponsiveContainer } from 'recharts';
 import BottomNav from '../components/BottomNav';
+import BannerAd from '../components/BannerAd'; // Import Ad Component
 import { db } from '../services/database';
 import { useData } from '../contexts/DataContext';
 import { useNavigate } from 'react-router-dom';
@@ -108,6 +109,7 @@ const DashboardScreen: React.FC = () => {
   const { dashboardMetrics: metrics, monthlyInsights: insights, transactions, loading, refreshing, refreshData } = useData();
   
   const [userName, setUserName] = useState('Usuário');
+  const [userPlan, setUserPlan] = useState<'free' | 'pro' | 'ultra'>('free'); // State for Plan
   const [avatarUrl, setAvatarUrl] = useState(DEFAULT_AVATAR);
   const [isShortcutOpen, setIsShortcutOpen] = useState(false);
   
@@ -172,13 +174,21 @@ const DashboardScreen: React.FC = () => {
   }, [transactions]);
 
   useEffect(() => {
-    const user = db.getCurrentUser();
-    if (user) setUserName(user.name.split(' ')[0]);
-    const savedAvatar = localStorage.getItem('fincontrol_user_avatar');
-    if (savedAvatar) setAvatarUrl(savedAvatar);
+    const fetchUser = async () => {
+        const user = db.getCurrentUser();
+        if (user) setUserName(user.name.split(' ')[0]);
+        const savedAvatar = localStorage.getItem('fincontrol_user_avatar');
+        if (savedAvatar) setAvatarUrl(savedAvatar);
+        
+        // Fetch Profile for Plan
+        const profile = await db.getUserProfile();
+        if (profile) setUserPlan(profile.plan);
+    };
+    fetchUser();
   }, []);
 
   const isMinimal = chartStyle === 'minimal';
+  const isPremium = userPlan === 'pro' || userPlan === 'ultra';
 
   return (
     <div className="bg-background-light dark:bg-background-dark font-display text-white overflow-hidden h-screen flex flex-col selection:bg-primary/30">
@@ -258,16 +268,20 @@ const DashboardScreen: React.FC = () => {
               
               {/* Stats Row */}
               <div className="flex gap-2 sm:gap-3">
-                <div className="flex flex-col gap-1 flex-1 min-w-0 bg-[#0a3899]/40 rounded-lg p-2 sm:p-3 backdrop-blur-md border border-white/5">
+                <div className="flex flex-col gap-1 flex-1 min-w-0 bg-[#0a3899]/40 rounded-lg p-2 sm:p-3 backdrop-blur-md border border-white/5 relative overflow-hidden">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1 text-blue-100/80 text-[10px] sm:text-xs font-medium">
                         <div className="bg-green-500/20 p-0.5 rounded-full"><span className="material-symbols-outlined text-[10px] sm:text-[12px] text-green-300 rotate-180 block">arrow_outward</span></div>
                         Receitas
                     </div>
-                    {metrics?.monthVariationIncome !== 0 && (
-                        <span className={`text-[9px] font-bold ${metrics?.monthVariationIncome! > 0 ? 'text-green-300' : 'text-red-300'}`}>
-                           {metrics?.monthVariationIncome! > 0 ? '+' : ''}{metrics?.monthVariationIncome?.toFixed(0)}%
-                        </span>
+                    {isPremium ? (
+                        metrics?.monthVariationIncome !== 0 && (
+                            <span className={`text-[9px] font-bold ${metrics?.monthVariationIncome! > 0 ? 'text-green-300' : 'text-red-300'}`}>
+                               {metrics?.monthVariationIncome! > 0 ? '+' : ''}{metrics?.monthVariationIncome?.toFixed(0)}%
+                            </span>
+                        )
+                    ) : (
+                        <span className="material-symbols-outlined text-[12px] text-white/30" onClick={() => navigate('/profile/plan')}>lock</span>
                     )}
                   </div>
                   {isLoading ? <Skeleton className="h-5 w-20 bg-white/10" /> : (
@@ -277,16 +291,20 @@ const DashboardScreen: React.FC = () => {
                   )}
                 </div>
 
-                <div className="flex flex-col gap-1 flex-1 min-w-0 bg-[#0a3899]/40 rounded-lg p-2 sm:p-3 backdrop-blur-md border border-white/5">
+                <div className="flex flex-col gap-1 flex-1 min-w-0 bg-[#0a3899]/40 rounded-lg p-2 sm:p-3 backdrop-blur-md border border-white/5 relative overflow-hidden">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1 text-blue-100/80 text-[10px] sm:text-xs font-medium">
                         <div className="bg-red-500/20 p-0.5 rounded-full"><span className="material-symbols-outlined text-[10px] sm:text-[12px] text-red-300 block">arrow_outward</span></div>
                         Despesas
                     </div>
-                    {metrics?.monthVariationExpense !== 0 && (
-                        <span className={`text-[9px] font-bold ${metrics?.monthVariationExpense! < 0 ? 'text-green-300' : 'text-red-300'}`}>
-                           {metrics?.monthVariationExpense! > 0 ? '+' : ''}{metrics?.monthVariationExpense?.toFixed(0)}%
-                        </span>
+                    {isPremium ? (
+                        metrics?.monthVariationExpense !== 0 && (
+                            <span className={`text-[9px] font-bold ${metrics?.monthVariationExpense! < 0 ? 'text-green-300' : 'text-red-300'}`}>
+                               {metrics?.monthVariationExpense! > 0 ? '+' : ''}{metrics?.monthVariationExpense?.toFixed(0)}%
+                            </span>
+                        )
+                    ) : (
+                        <span className="material-symbols-outlined text-[12px] text-white/30" onClick={() => navigate('/profile/plan')}>lock</span>
                     )}
                   </div>
                   {isLoading ? <Skeleton className="h-5 w-20 bg-white/10" /> : (
@@ -348,16 +366,27 @@ const DashboardScreen: React.FC = () => {
           )}
         </div>
 
+        {/* --- ADVERTISEMENT (ONLY FREE) --- */}
+        {!isLoading && <BannerAd freePlan={userPlan === 'free'} />}
+
         {/* --- CHART & INSIGHTS --- */}
         <div className="px-4 pb-2">
            <div className="flex justify-between items-end mb-4">
               <div>
                   <h3 className="text-white text-lg font-bold leading-tight tracking-[-0.015em]">Visão Geral</h3>
-                  <p className="text-xs text-text-secondary mt-1">
-                      {metrics?.monthVariationExpense! > 0 
-                        ? `Gastos subiram ${metrics?.monthVariationExpense?.toFixed(0)}% este mês` 
-                        : 'Você está gastando menos que mês passado!'}
-                  </p>
+                  {isPremium ? (
+                      <button onClick={() => navigate('/reports/comparison')} className="text-xs text-text-secondary mt-1 hover:text-white transition-colors flex items-center gap-1 group">
+                          {metrics?.monthVariationExpense! > 0 
+                            ? `Gastos subiram ${metrics?.monthVariationExpense?.toFixed(0)}% este mês` 
+                            : 'Você está gastando menos que mês passado!'}
+                          <span className="material-symbols-outlined text-[12px] opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
+                      </button>
+                  ) : (
+                      <button onClick={() => navigate('/profile/plan')} className="flex items-center gap-1 text-xs text-yellow-500 mt-1 font-bold hover:underline">
+                          <span className="material-symbols-outlined text-[12px]">lock</span>
+                          Comparativo mensal indisponível
+                      </button>
+                  )}
               </div>
               <button onClick={() => navigate('/statement')} className="text-primary text-xs font-bold bg-primary/10 px-3 py-1 rounded-full">Relatório</button>
            </div>
