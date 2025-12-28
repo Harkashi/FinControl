@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { db } from '../services/database';
@@ -43,9 +44,14 @@ const MethodsScreen: React.FC = () => {
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
-    await db.savePaymentMethod({ name: newName });
-    setNewName('');
-    loadData();
+    const { success } = await db.savePaymentMethod({ name: newName });
+    
+    if (success) {
+      setNewName('');
+      loadData();
+    } else {
+      alert("Erro ao adicionar método. Tente novamente.");
+    }
   };
 
   const handleEdit = (method: PaymentMethod) => {
@@ -55,10 +61,15 @@ const MethodsScreen: React.FC = () => {
 
   const handleUpdate = async () => {
     if (!editingMethod || !editName.trim()) return;
-    await db.savePaymentMethod({ ...editingMethod, name: editName });
-    setEditingMethod(null);
-    setEditName('');
-    loadData();
+    const { success } = await db.savePaymentMethod({ ...editingMethod, name: editName });
+    
+    if (success) {
+      setEditingMethod(null);
+      setEditName('');
+      loadData();
+    } else {
+      alert("Erro ao atualizar método.");
+    }
   };
 
   const confirmDelete = (e: React.MouseEvent, method: PaymentMethod) => {

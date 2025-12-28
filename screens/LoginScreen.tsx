@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { db } from '../services/database';
@@ -68,7 +69,11 @@ const LoginScreen: React.FC = () => {
         if (result.success) {
           navigate('/dashboard');
         } else {
-          setError(result.message || 'Erro ao cadastrar.');
+          let msg = result.message || 'Erro ao cadastrar.';
+          if (msg.includes('already registered')) {
+             msg = 'Este e-mail já está em uso.';
+          }
+          setError(msg);
           setLoading(false);
         }
       }

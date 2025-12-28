@@ -101,6 +101,7 @@ class DatabaseService {
     if (error) return { success: false, message: error.message };
     if (data.user) {
       this.currentUser = this.mapSupabaseUser(data.user);
+      // Apenas no Registro criamos o perfil
       await this.ensureProfileExists();
       return { success: true };
     }
@@ -110,8 +111,18 @@ class DatabaseService {
   async loginUser(email: string, password: string): Promise<{ success: boolean; message?: string }> {
     const { data, error } = await this.supabase.auth.signInWithPassword({ email, password });
     if (error) return { success: false, message: 'Credenciais inválidas.' };
+    
     if (data.user) {
       this.currentUser = this.mapSupabaseUser(data.user);
+      
+      // Verifica se o perfil existe.
+      const { data: profile } = await this.supabase.from('profiles').select('id').eq('id', data.user.id).single();
+      
+      if (!profile) {
+          // Se logou mas não tem perfil, cria o perfil (fallback de segurança)
+          await this.ensureProfileExists();
+      }
+
       return { success: true };
     }
     return { success: false, message: 'Erro ao entrar.' };
@@ -130,6 +141,8 @@ class DatabaseService {
       const { data } = await this.supabase.auth.getSession();
       if (data.session?.user) {
         this.currentUser = this.mapSupabaseUser(data.session.user);
+        // Garante integridade se a sessão existir
+        await this.ensureProfileExists();
         return true;
       }
     } catch (e) {
@@ -141,17 +154,28 @@ class DatabaseService {
   // --- SEEDING & PROFILE ---
   async ensureProfileExists(): Promise<void> {
     if (!this.currentUser) return;
+    
+    // Check if profile exists
     const { data } = await this.supabase.from('profiles').select('id').eq('id', this.currentUser.id).single();
+    
     if (!data) {
+      // Create fresh profile
       await this.supabase.from('profiles').insert({ id: this.currentUser.id, email: this.currentUser.email });
       await this.supabase.from('notification_settings').insert({ user_id: this.currentUser.id });
+      // Create fresh data seeds
       await this.seedDefaultCategories();
+      await this.seedDefaultWallets();
+      await this.seedDefaultMethods();
     }
   }
 
   private async seedDefaultCategories() {
     if (!this.currentUser) return;
     try {
+      // Check if already seeded to avoid duplicates in edge cases
+      const { count } = await this.supabase.from('categories').select('*', { count: 'exact', head: true }).eq('user_id', this.currentUser.id);
+      if (count && count > 0) return;
+
       const payload = DEFAULT_CATEGORY_SEEDS.map(c => ({ user_id: this.currentUser!.id, ...c }));
       await this.supabase.from('categories').insert(payload);
     } catch (e) {
@@ -161,6 +185,9 @@ class DatabaseService {
   private async seedDefaultWallets() {
     if (!this.currentUser) return;
     try {
+      const { count } = await this.supabase.from('wallets').select('*', { count: 'exact', head: true }).eq('user_id', this.currentUser.id);
+      if (count && count > 0) return;
+
       const payload = DEFAULT_WALLETS.map(w => ({ user_id: this.currentUser!.id, ...w }));
       await this.supabase.from('wallets').insert(payload);
     } catch(e) { console.error("Seeding wallets failed", e); }
@@ -168,6 +195,9 @@ class DatabaseService {
   private async seedDefaultMethods() {
     if (!this.currentUser) return;
     try {
+      const { count } = await this.supabase.from('payment_methods').select('*', { count: 'exact', head: true }).eq('user_id', this.currentUser.id);
+      if (count && count > 0) return;
+
       const payload = DEFAULT_METHODS.map(m => ({ user_id: this.currentUser!.id, ...m }));
       await this.supabase.from('payment_methods').insert(payload);
     } catch(e) { console.error("Seeding methods failed", e); }
@@ -177,6 +207,8 @@ class DatabaseService {
   async getWallets(): Promise<Wallet[]> {
     if (!this.currentUser) return [];
     
+    // Select seguro, sem pedir explicitamente 'order' se não tiver certeza que existe, 
+    // mas o Supabase retorna todas as colunas com '*'.
     let { data, error } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
     
     if (!data || data.length === 0) {
@@ -186,28 +218,78 @@ class DatabaseService {
     }
     
     const safeData = data || [];
+    // Ordenação segura no client-side (se order não existir, assume 0)
     return safeData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   }
 
-  async saveWallet(wallet: Partial<Wallet>): Promise<void> {
-     if (!this.currentUser) return;
-     const payload: any = { ...wallet, user_id: this.currentUser.id };
+  async saveWallet(wallet: Partial<Wallet>): Promise<{ success: boolean; error?: any }> {
+     if (!this.currentUser) return { success: false, error: 'Usuário não autenticado' };
+     
      try {
-        if (wallet.id) await this.supabase.from('wallets').update(payload).eq('id', wallet.id);
-        else {
-            const { data: existing } = await this.supabase.from('wallets').select('*').eq('user_id', this.currentUser.id);
-            const maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((w: any) => w.order || 0)) : 0;
-            await this.supabase.from('wallets').insert({ ...payload, order: maxOrder + 1 });
+        if (wallet.id) {
+            // Update
+            const { error } = await this.supabase.from('wallets').update({
+                name: wallet.name,
+                type: wallet.type,
+                is_default: wallet.is_default
+            }).eq('id', wallet.id);
+            
+            if (error) throw error;
+        } else {
+            // Insert - Tentativa Robusta
+            try {
+                // Tenta buscar a ordem máxima (pode falhar se a coluna não existir)
+                let maxOrder = 0;
+                try {
+                    const { data: existing } = await this.supabase.from('wallets').select('order').eq('user_id', this.currentUser.id);
+                    maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((w: any) => w.order || 0)) : 0;
+                } catch (e) {
+                    console.warn("Could not fetch wallet order, defaulting to 0");
+                }
+                
+                // Tenta inserir com order
+                const { error } = await this.supabase.from('wallets').insert({
+                    user_id: this.currentUser.id,
+                    name: wallet.name,
+                    type: wallet.type || 'account',
+                    is_default: wallet.is_default || false,
+                    order: maxOrder + 1
+                });
+                
+                // Se der erro de coluna inexistente (PGRST204 ou similar), tenta inserir sem order
+                if (error) {
+                    if (error.code === 'PGRST204' || error.code === '42703' || error.message?.includes('order')) {
+                        console.warn("Column 'order' missing, retrying insert without it.");
+                        const { error: retryError } = await this.supabase.from('wallets').insert({
+                            user_id: this.currentUser.id,
+                            name: wallet.name,
+                            type: wallet.type || 'account',
+                            is_default: wallet.is_default || false
+                        });
+                        if (retryError) throw retryError;
+                    } else {
+                        throw error;
+                    }
+                }
+            } catch (innerError) {
+                throw innerError;
+            }
         }
+        return { success: true };
      } catch (e) {
          console.error("Save wallet failed", e);
+         return { success: false, error: e };
      }
   }
 
   async updateWalletsOrder(wallets: Wallet[]): Promise<void> {
      if (!this.currentUser) return;
-     const updates = wallets.map((w, index) => ({ id: w.id, user_id: this.currentUser!.id, name: w.name, type: w.type, is_default: w.is_default, order: index }));
-     await this.supabase.from('wallets').upsert(updates);
+     try {
+        const updates = wallets.map((w, index) => ({ id: w.id, user_id: this.currentUser!.id, name: w.name, type: w.type, is_default: w.is_default, order: index }));
+        await this.supabase.from('wallets').upsert(updates);
+     } catch (e) {
+         console.warn("Order update failed (column likely missing)", e);
+     }
   }
 
   async deleteWallet(id: string): Promise<{ success: boolean; error?: any }> {
@@ -232,23 +314,61 @@ class DatabaseService {
     return safeData.sort((a: any, b: any) => (a.order || 0) - (b.order || 0));
   }
 
-  async savePaymentMethod(method: Partial<PaymentMethod>): Promise<void> {
-     if (!this.currentUser) return;
-     const payload: any = { ...method, user_id: this.currentUser.id };
+  async savePaymentMethod(method: Partial<PaymentMethod>): Promise<{ success: boolean; error?: any }> {
+     if (!this.currentUser) return { success: false, error: 'Usuário não autenticado' };
      try {
-        if (method.id) await this.supabase.from('payment_methods').update(payload).eq('id', method.id);
-        else {
-            const { data: existing } = await this.supabase.from('payment_methods').select('*').eq('user_id', this.currentUser.id);
-            const maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((m: any) => m.order || 0)) : 0;
-            await this.supabase.from('payment_methods').insert({ ...payload, order: maxOrder + 1 });
+        if (method.id) {
+            // Update
+            const { error } = await this.supabase.from('payment_methods').update({
+                name: method.name
+            }).eq('id', method.id);
+            if (error) throw error;
+        } else {
+            // Insert - Tentativa Robusta
+            try {
+                let maxOrder = 0;
+                try {
+                    const { data: existing } = await this.supabase.from('payment_methods').select('order').eq('user_id', this.currentUser.id);
+                    maxOrder = existing && existing.length > 0 ? Math.max(...existing.map((m: any) => m.order || 0)) : 0;
+                } catch(e) { console.warn("Could not fetch method order"); }
+                
+                const { error } = await this.supabase.from('payment_methods').insert({
+                    user_id: this.currentUser.id,
+                    name: method.name,
+                    order: maxOrder + 1
+                });
+
+                if (error) {
+                    if (error.code === 'PGRST204' || error.code === '42703' || error.message?.includes('order')) {
+                        console.warn("Column 'order' missing, retrying insert without it.");
+                        const { error: retryError } = await this.supabase.from('payment_methods').insert({
+                            user_id: this.currentUser.id,
+                            name: method.name
+                        });
+                        if (retryError) throw retryError;
+                    } else {
+                        throw error;
+                    }
+                }
+            } catch (innerError) {
+                throw innerError;
+            }
         }
-     } catch (e) { console.error(e); }
+        return { success: true };
+     } catch (e) { 
+         console.error("Save method failed", e);
+         return { success: false, error: e };
+     }
   }
 
   async updatePaymentMethodsOrder(methods: PaymentMethod[]): Promise<void> {
       if (!this.currentUser) return;
-      const updates = methods.map((m, index) => ({ id: m.id, user_id: this.currentUser!.id, name: m.name, order: index }));
-      await this.supabase.from('payment_methods').upsert(updates);
+      try {
+        const updates = methods.map((m, index) => ({ id: m.id, user_id: this.currentUser!.id, name: m.name, order: index }));
+        await this.supabase.from('payment_methods').upsert(updates);
+      } catch (e) {
+          console.warn("Order update failed", e);
+      }
   }
 
   async deletePaymentMethod(id: string): Promise<void> {
@@ -273,7 +393,7 @@ class DatabaseService {
     let budget = c.budget ?? c.budget_limit ?? 0;
     let description = c.description || '';
     
-    // Support legacy metadata if column budget is 0
+    // Support legacy metadata
     if (budget === 0 && description && description.includes(SEPARATOR)) {
         try {
             const parts = description.split(SEPARATOR);
@@ -301,7 +421,6 @@ class DatabaseService {
       if (!this.currentUser) return { success: false, error: 'Not authenticated' };
       const { error } = await this.supabase.from('categories').update({ budget: limit }).eq('id', categoryId).eq('user_id', this.currentUser.id);
       if (error) {
-          // Fallback if schema differs
           await this.supabase.from('categories').update({ budget_limit: limit }).eq('id', categoryId);
       }
       return { success: true };
@@ -314,7 +433,6 @@ class DatabaseService {
       }
 
       try {
-          // 1. Fetch current categories to handle legacy descriptions correctly
           const { data: categories, error: fetchError } = await this.supabase
             .from('categories')
             .select('*')
@@ -323,37 +441,28 @@ class DatabaseService {
           if (fetchError) throw fetchError;
           if (!categories || categories.length === 0) return { success: true };
 
-          // 2. Prepare updates
           const updates = categories.map((cat: any) => {
               let newDescription = cat.description;
-              
-              // Handle Legacy Metadata (strip budget from it or set to 0)
               if (newDescription && newDescription.includes(SEPARATOR)) {
                   try {
                       const parts = newDescription.split(SEPARATOR);
                       const text = parts[0];
                       const meta = JSON.parse(parts[1]);
-                      
                       if (meta) {
-                          meta.budget = 0; // Explicitly zero out legacy budget
+                          meta.budget = 0; 
                           newDescription = `${text}${SEPARATOR}${JSON.stringify(meta)}`;
                       }
-                  } catch (e) {
-                      // If parse fails, keep description as is
-                  }
+                  } catch (e) {}
               }
-
               return {
                   ...cat,
-                  budget: 0,       // Reset column
-                  budget_limit: 0, // Reset legacy column alias if exists
+                  budget: 0,
+                  budget_limit: 0,
                   description: newDescription
               };
           });
 
-          // 3. Apply updates
           const { error: updateError } = await this.supabase.from('categories').upsert(updates);
-          
           if (updateError) throw updateError;
 
           return { success: true };
@@ -386,9 +495,62 @@ class DatabaseService {
   }
   
   async deleteCategory(id: string): Promise<{ success: boolean; error?: any }> {
-    if (!this.currentUser) return { success: false, error: 'Not authenticated' };
-    const { error } = await this.supabase.from('categories').delete().eq('id', id);
-    return error ? { success: false, error } : { success: true };
+    if (!this.currentUser) await this.checkSession();
+    if (!this.currentUser) return { success: false, error: 'Usuário não autenticado' };
+    
+    try {
+        const userId = this.currentUser.id;
+
+        // 1. Tentar apagar regras inteligentes associadas
+        try {
+            await this.supabase.from('smart_category_rules').delete().eq('category_id', id);
+        } catch (e) { console.warn("Erro ao apagar regras (não crítico):", e); }
+
+        // 2. Lidar com Transações Vinculadas
+        // Tenta setar NULL primeiro (padrão)
+        const { error: updateNullError } = await this.supabase.from('transactions').update({ category_id: null }).eq('category_id', id);
+        
+        // Se falhar (ex: coluna NOT NULL ou erro de RLS), tentamos migrar para outra categoria
+        if (updateNullError) {
+             console.warn("Não foi possível desvincular categoria (provável NOT NULL). Tentando migrar para outra...", updateNullError);
+             
+             // Busca qualquer outra categoria do usuário para servir de "Lixeira/Geral"
+             const { data: otherCats } = await this.supabase.from('categories').select('id').eq('user_id', userId).neq('id', id).limit(1);
+             
+             if (otherCats && otherCats.length > 0) {
+                 const fallbackId = otherCats[0].id;
+                 const { error: moveError } = await this.supabase.from('transactions').update({ category_id: fallbackId }).eq('category_id', id);
+                 if (moveError) {
+                     return { success: false, error: `Erro ao migrar transações para outra categoria: ${moveError.message}` };
+                 }
+             } else {
+                 // Se não tem para onde mover e não pode ser null, impede a exclusão
+                 return { success: false, error: "Não é possível excluir esta categoria pois ela possui transações e não há outra categoria para recebê-las." };
+             }
+        }
+
+        // 3. Excluir a Categoria
+        const { error: deleteError } = await this.supabase.from('categories').delete().eq('id', id);
+        
+        if (deleteError) {
+            // Se ainda der erro de chave estrangeira (FK), tentamos forçar a migração novamente
+            if (deleteError.code === '23503') {
+                 const { data: otherCats } = await this.supabase.from('categories').select('id').eq('user_id', userId).neq('id', id).limit(1);
+                 if (otherCats && otherCats.length > 0) {
+                     await this.supabase.from('transactions').update({ category_id: otherCats[0].id }).eq('category_id', id);
+                     const { error: retryError } = await this.supabase.from('categories').delete().eq('id', id);
+                     if (retryError) return { success: false, error: retryError.message };
+                     return { success: true };
+                 }
+                 return { success: false, error: "Erro de dependência: Existem dados vinculados a esta categoria que o sistema não conseguiu remover." };
+            }
+            return { success: false, error: deleteError.message };
+        }
+        
+        return { success: true };
+    } catch (e: any) {
+        return { success: false, error: e.message || "Erro desconhecido ao excluir categoria." };
+    }
   }
 
   // --- GOALS ---
@@ -439,7 +601,6 @@ class DatabaseService {
   async getTransactions(): Promise<Transaction[]> {
     if (!this.currentUser) return [];
     
-    // IMPORTANTE: Ordenar por data DESC E created_at DESC para garantir ordem correta no mesmo dia
     const { data, error } = await this.supabase
       .from('transactions')
       .select('*')
@@ -857,7 +1018,7 @@ class DatabaseService {
   
   async getUserProfile(): Promise<UserProfile | null> { 
       if (!this.currentUser) return null; 
-      await this.ensureProfileExists(); 
+      // Se não tiver perfil, é porque foi deletado. A checagem de sessão irá tratar disso.
       const { data } = await this.supabase.from('profiles').select('*').eq('id', this.currentUser.id).single(); 
       return data || null; 
   }
@@ -933,7 +1094,69 @@ class DatabaseService {
   
   async deleteAccount(): Promise<{ success: boolean, error?: any }> {
     if (!this.currentUser) return { success: false, error: 'Usuário não autenticado' };
-    return { success: true };
+    
+    try {
+        const userId = this.currentUser.id;
+
+        // 1. Limpeza de dados manuais (Tudo que tem FK com user_id nas tabelas publicas)
+        // Tentamos limpar explicitamente para evitar erros de FK se não houver CASCADE configurado
+        
+        // Tabela que estava causando erro FK: user_activity
+        await this.supabase.from('user_activity').delete().eq('user_id', userId);
+
+        await this.supabase.from('transactions').delete().eq('user_id', userId);
+        await this.supabase.from('financial_goals').delete().eq('user_id', userId);
+        await this.supabase.from('smart_category_rules').delete().eq('user_id', userId);
+        await this.supabase.from('notification_settings').delete().eq('user_id', userId);
+        
+        // Tentamos apagar automation_settings, mas protegemos com try/catch caso a tabela não exista (erro 42P01)
+        try {
+            await this.supabase.from('automation_settings').delete().eq('user_id', userId);
+        } catch (e) { console.warn("Tabela automation_settings pode não existir, ignorando."); }
+        
+        // Tabelas referenciáveis
+        await this.supabase.from('categories').delete().eq('user_id', userId);
+        await this.supabase.from('wallets').delete().eq('user_id', userId);
+        await this.supabase.from('payment_methods').delete().eq('user_id', userId);
+        
+        await this.supabase.from('profiles').delete().eq('id', userId);
+
+        // 2. HARD DELETE: Exclusão da credencial Auth via RPC (Postgres Function)
+        // Isso é OBRIGATÓRIO para liberar o email para novo cadastro.
+        const { error: rpcError } = await this.supabase.rpc('delete_user');
+        
+        if (rpcError) {
+            console.error("RPC delete_user falhou:", rpcError);
+            
+            // Tratamento específico para o erro 42P01 (Tabela Inexistente)
+            if (rpcError.code === '42P01') {
+                 return { 
+                    success: false, 
+                    error: { message: `Erro de Configuração do Banco de Dados: Uma tabela necessária para a limpeza (${rpcError.message}) não existe. Execute o script SQL de correção no painel do Supabase.` }
+                };
+            }
+
+            // Tratamento específico para o erro FK 23503 (Foreign Key Violation)
+            if (rpcError.code === '23503') {
+                 return { 
+                    success: false, 
+                    error: { message: "Erro de permissão no banco de dados. Ainda existem dados vinculados que o aplicativo não conseguiu apagar. Por favor, execute o script SQL 'delete_user' atualizado no painel do Supabase." }
+                };
+            }
+
+            return { 
+                success: false, 
+                error: { message: "Erro crítico: Não foi possível deletar o login. Verifique se a função 'delete_user' foi criada corretamente no Supabase." }
+            };
+        }
+
+        // Se chegou aqui, a conta auth sumiu. O logout é consequência.
+        await this.logout();
+        return { success: true };
+    } catch (error: any) {
+        console.error("Erro fatal ao deletar conta:", error);
+        return { success: false, error: error.message || error };
+    }
   }
   
   // Export Logic

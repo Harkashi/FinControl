@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { db } from '../services/database';
@@ -44,9 +45,14 @@ const WalletsScreen: React.FC = () => {
 
   const handleAdd = async () => {
     if (!newName.trim()) return;
-    await db.saveWallet({ name: newName, type: 'account', is_default: false });
-    setNewName('');
-    loadData();
+    const { success } = await db.saveWallet({ name: newName, type: 'account', is_default: false });
+    
+    if (success) {
+      setNewName('');
+      loadData();
+    } else {
+      alert("Erro ao adicionar conta. Tente novamente.");
+    }
   };
 
   const handleEdit = (wallet: Wallet) => {
@@ -56,10 +62,15 @@ const WalletsScreen: React.FC = () => {
 
   const handleUpdate = async () => {
     if (!editingWallet || !editName.trim()) return;
-    await db.saveWallet({ ...editingWallet, name: editName });
-    setEditingWallet(null);
-    setEditName('');
-    loadData();
+    const { success } = await db.saveWallet({ ...editingWallet, name: editName });
+    
+    if (success) {
+      setEditingWallet(null);
+      setEditName('');
+      loadData();
+    } else {
+      alert("Erro ao atualizar conta.");
+    }
   };
 
   const confirmDelete = (e: React.MouseEvent, wallet: Wallet) => {

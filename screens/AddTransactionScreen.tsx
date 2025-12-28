@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useData } from '../contexts/DataContext';
@@ -5,7 +6,7 @@ import { Category, Wallet, PaymentMethod } from '../types';
 
 interface TransactionDraft {
   type?: 'income' | 'expense' | 'transfer';
-  amount?: string;
+  amount?: string | number;
   description?: string;
   categoryId?: string;
   date?: string;
@@ -32,7 +33,19 @@ const AddTransactionScreen: React.FC = () => {
   
   // Core State
   const [type, setType] = useState<'income' | 'expense' | 'transfer'>(() => state?.type || 'income');
-  const [amount, setAmount] = useState(() => state?.amount || '');
+  
+  // FIX: Ensure amount is initialized as string to avoid .replace crash
+  const [amount, setAmount] = useState(() => {
+    if (state?.amount !== undefined && state?.amount !== null) {
+      // If it's a number (from edit mode), format it to "1.234,56"
+      if (typeof state.amount === 'number') {
+        return state.amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      }
+      return String(state.amount);
+    }
+    return '';
+  });
+
   const [description, setDescription] = useState(() => state?.description || '');
   const [date, setDate] = useState(() => state?.date || new Date().toISOString().split('T')[0]);
   
@@ -130,17 +143,23 @@ const AddTransactionScreen: React.FC = () => {
     let cleanAmount = 0;
     let financingData = undefined;
 
+    // Helper safely converting string amount to float
+    const parseAmount = (val: string) => {
+       if (typeof val !== 'string') return 0;
+       return parseFloat(val.replace(/\./g, '').replace(',', '.'));
+    };
+
     if (isSmartCalc && hasInterest && calculatedInstallment > 0) {
         cleanAmount = calculatedInstallment;
         financingData = {
             interestRate: parseFloat(monthlyInterestRate.replace(',', '.')),
-            loanAmount: parseFloat(amount.replace(/\./g, '').replace(',', '.')),
-            totalInterest: (calculatedInstallment * installments) - parseFloat(amount.replace(/\./g, '').replace(',', '.'))
+            loanAmount: parseAmount(amount),
+            totalInterest: (calculatedInstallment * installments) - parseAmount(amount)
         };
     } else if (hasInterest && totalWithInterest) {
-        cleanAmount = parseFloat(totalWithInterest.replace(/\./g, '').replace(',', '.'));
+        cleanAmount = parseAmount(totalWithInterest);
     } else {
-        cleanAmount = parseFloat(amount.replace(/\./g, '').replace(',', '.'));
+        cleanAmount = parseAmount(amount);
     }
     
     let customIcon = undefined;
@@ -196,9 +215,16 @@ const AddTransactionScreen: React.FC = () => {
 
   const filteredCategories = categories.filter(c => c.type === type || c.type === 'both');
 
-  const finalTotalManual = hasInterest && totalWithInterest && !isSmartCalc 
-      ? parseFloat(totalWithInterest.replace(/\./g, '').replace(',', '.')) 
-      : parseFloat(amount.replace(/\./g, '').replace(',', '.') || '0');
+  // Safer Calc for display
+  const getDisplayTotal = () => {
+      try {
+        if (hasInterest && totalWithInterest && !isSmartCalc) {
+            return parseFloat(totalWithInterest.replace(/\./g, '').replace(',', '.'));
+        }
+        return parseFloat(amount.replace(/\./g, '').replace(',', '.') || '0');
+      } catch (e) { return 0; }
+  };
+  const finalTotalManual = getDisplayTotal();
   const installmentValueManual = installments > 0 ? finalTotalManual / installments : 0;
 
   return (

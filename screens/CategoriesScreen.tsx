@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import BottomNav from '../components/BottomNav';
@@ -84,10 +85,26 @@ const CategoriesScreen: React.FC = () => {
 
   const handleDelete = async () => {
     if (!editingId) return;
-    if (confirm('Tem certeza? Isso pode afetar transações antigas.')) {
-        await db.deleteCategory(editingId);
-        await loadCategories();
-        closeModal();
+    if (confirm('Tem certeza que deseja excluir esta categoria? As transações vinculadas a ela ficarão sem categoria.')) {
+        if (loading) return; // Evita cliques duplos
+        setLoading(true);
+        
+        try {
+            const { success, error } = await db.deleteCategory(editingId);
+            
+            if (success) {
+                await loadCategories();
+                closeModal();
+            } else {
+                console.error("Erro ao excluir:", error);
+                const msg = typeof error === 'string' ? error : (error?.message || 'Não foi possível excluir a categoria. Verifique se há restrições no banco de dados.');
+                alert(msg);
+            }
+        } catch (e) {
+            alert('Ocorreu um erro inesperado ao tentar excluir.');
+        } finally {
+            setLoading(false);
+        }
     }
   };
 
@@ -299,8 +316,12 @@ const CategoriesScreen: React.FC = () => {
 
             <div className="p-4 border-t border-slate-100 dark:border-slate-800 flex gap-3">
                {editingId && (
-                   <button onClick={handleDelete} className="p-3 bg-red-100 dark:bg-red-500/10 text-red-500 rounded-xl hover:bg-red-200 dark:hover:bg-red-500/20 transition-colors">
-                       <span className="material-symbols-outlined">delete</span>
+                   <button 
+                     onClick={handleDelete} 
+                     disabled={loading}
+                     className="p-3 bg-red-100 dark:bg-red-500/10 text-red-500 rounded-xl hover:bg-red-200 dark:hover:bg-red-500/20 transition-colors disabled:opacity-50"
+                   >
+                       {loading ? <span className="material-symbols-outlined animate-spin">refresh</span> : <span className="material-symbols-outlined">delete</span>}
                    </button>
                )}
                <button onClick={handleSave} className="flex-1 h-12 bg-primary text-white font-bold rounded-xl shadow-lg shadow-primary/30 hover:bg-primary-dark transition-colors">

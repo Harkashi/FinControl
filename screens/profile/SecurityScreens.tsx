@@ -1,3 +1,4 @@
+
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../services/database';
@@ -170,15 +171,24 @@ export const DeleteAccountScreen: React.FC = () => {
   const navigate = useNavigate();
   const [confirmText, setConfirmText] = useState('');
   const [loading, setLoading] = useState(false);
+  const [status, setStatus] = useState<{type: 'success' | 'error', msg: string} | null>(null); // Novo estado para feedback
 
   const handleDelete = async () => {
-    if (confirmText !== 'DELETAR') return;
+    if (confirmText !== 'DELETAR') {
+      setStatus({ type: 'error', msg: 'Digite "DELETAR" corretamente para confirmar.' });
+      return;
+    }
     setLoading(true);
+    setStatus(null); // Limpa status anterior
+    
     const result = await db.deleteAccount();
+    
     if (result.success) {
-      navigate('/login');
+      setStatus({ type: 'success', msg: 'Conta excluída permanentemente. Redirecionando...' });
+      setTimeout(() => navigate('/login'), 1500); // Atraso para o usuário ver a mensagem
     } else {
-      alert('Erro ao excluir conta: ' + (result.error?.message || 'Erro desconhecido'));
+      // Exibe a mensagem de erro específica do serviço
+      setStatus({ type: 'error', msg: result.error?.message || 'Erro desconhecido ao excluir conta.' });
       setLoading(false);
     }
   };
@@ -201,10 +211,20 @@ export const DeleteAccountScreen: React.FC = () => {
              <input 
                type="text" 
                value={confirmText}
-               onChange={e => setConfirmText(e.target.value)}
+               onChange={e => {
+                   setConfirmText(e.target.value);
+                   if (status) setStatus(null); // Limpa o status ao digitar
+               }}
                className="w-full p-3 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-transparent focus:border-red-500 outline-none text-center font-bold dark:text-white"
                placeholder="DELETAR"
              />
+
+             {status && (
+                <div className={`mt-4 p-3 rounded-lg text-sm font-medium flex items-center gap-2 ${status.type === 'error' ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
+                   <span className="material-symbols-outlined text-[18px]">{status.type === 'error' ? 'error' : 'check_circle'}</span>
+                   {status.msg}
+                </div>
+             )}
 
              <button 
                onClick={handleDelete}
