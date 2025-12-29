@@ -2,6 +2,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo, useCallback } from 'react';
 import { db } from '../services/database';
 import { Transaction, Category, Wallet, PaymentMethod, FinancialGoal, DashboardMetrics, MonthlyInsight, BudgetReport } from '../types';
+import { googleDriveService } from '../services/googleDriveService';
 
 interface DataContextType {
   // Data
@@ -88,12 +89,34 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, []);
 
+  // --- AUTOMATIC BACKUP TRIGGER ---
+  const triggerAutoBackup = async () => {
+      // 1. Check if enabled
+      const isEnabled = localStorage.getItem('fincontrol_auto_backup') === 'true';
+      if (!isEnabled) return;
+
+      // 2. Check if token valid
+      if (!googleDriveService.isAuthenticated()) return;
+
+      // 3. Upload silently
+      try {
+          const json = await db.createFullBackup();
+          const filename = `FinControl_AutoBackup_${new Date().toISOString().split('T')[0]}.json`;
+          console.log("Triggering auto-backup...");
+          await googleDriveService.uploadFile(json, filename);
+      } catch (e) {
+          console.warn("Auto backup failed silently", e);
+      }
+  };
+
   // --- ACTIONS WITH OPTIMISTIC UPDATES ---
 
   const addTransaction = async (txData: any) => {
     const result = await db.addTransaction(txData);
     if (result.success) {
         await loadAllData(); // Ensure state is updated before resolving
+        // Trigger Backup after state update
+        triggerAutoBackup();
     }
     return result;
   };
@@ -115,6 +138,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return false;
     }
     if (!cat.id) await loadAllData();
+    triggerAutoBackup();
     return true;
   };
 
@@ -125,6 +149,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       await db.saveWallet(wallet);
       await loadAllData();
+      triggerAutoBackup();
   };
 
   const deleteWallet = async (id: string) => {
@@ -136,6 +161,7 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setWallets(originalWallets); 
           return false;
       }
+      triggerAutoBackup();
       return true;
   };
 

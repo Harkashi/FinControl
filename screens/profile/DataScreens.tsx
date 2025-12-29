@@ -3,6 +3,8 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../../services/database';
 import { UserProfile } from '../../types';
+import { googleDriveService } from '../../services/googleDriveService';
+import { SwitchItem } from '../../components/SettingsComponents';
 
 export const DataScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -11,9 +13,28 @@ export const DataScreen: React.FC = () => {
   const [status, setStatus] = useState<{type: 'success' | 'error', msg: string} | null>(null);
   const [showExportOptions, setShowExportOptions] = useState(false);
   
+  // Google Drive State
+  const [isDriveConnected, setIsDriveConnected] = useState(false);
+  const [isAutoBackupEnabled, setIsAutoBackupEnabled] = useState(false);
+  const [driveLoading, setDriveLoading] = useState(false);
+
   useEffect(() => {
     db.getUserProfile().then(setProfile);
+    
+    // Init Google Service
+    googleDriveService.init();
+    checkDriveStatus();
+
+    // Listen for token updates
+    window.addEventListener('gdrive_token_updated', checkDriveStatus);
+    return () => window.removeEventListener('gdrive_token_updated', checkDriveStatus);
   }, []);
+
+  const checkDriveStatus = () => {
+      setIsDriveConnected(googleDriveService.isAuthenticated());
+      const savedAuto = localStorage.getItem('fincontrol_auto_backup') === 'true';
+      setIsAutoBackupEnabled(savedAuto);
+  };
 
   // 1. Export CSV (Padrão) - AGORA FUNCIONAL
   const handleExportCSV = async () => {
@@ -71,102 +92,50 @@ export const DataScreen: React.FC = () => {
             <style>
               @page { size: A4; margin: 15mm; }
               body { font-family: 'Helvetica', 'Arial', sans-serif; padding: 20px; color: #1e293b; max-width: 800px; margin: 0 auto; }
-              
-              /* Header */
               .header { margin-bottom: 30px; border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-start; }
               .header h1 { color: #0f172a; margin: 0 0 5px 0; font-size: 24px; }
               .header p { margin: 0; color: #64748b; font-size: 12px; }
-              
-              /* Cards */
               .summary { display: flex; gap: 15px; margin-bottom: 30px; }
               .card { background: #f8fafc; padding: 15px; border-radius: 8px; flex: 1; border: 1px solid #e2e8f0; }
               .card h3 { margin: 0 0 5px 0; font-size: 11px; text-transform: uppercase; color: #64748b; font-weight: bold; letter-spacing: 0.5px; }
               .card p { margin: 0; font-size: 18px; font-weight: bold; color: #0f172a; }
-              
-              /* Table */
               table { width: 100%; border-collapse: collapse; font-size: 11px; }
               thead { display: table-header-group; }
               tr { page-break-inside: avoid; }
               th { text-align: left; padding: 12px 8px; background: #f1f5f9; border-bottom: 2px solid #cbd5e1; color: #475569; font-weight: bold; text-transform: uppercase; }
               td { padding: 10px 8px; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
-              
               .text-right { text-align: right; }
               .income { color: #16a34a; font-weight: bold; }
               .expense { color: #dc2626; font-weight: bold; }
               .meta { color: #94a3b8; font-size: 10px; margin-top: 2px; }
               .badge { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 9px; font-weight: 600; color: #475569; display: inline-block; }
-
-              @media print {
-                 .no-print { display: none; }
-                 body { -webkit-print-color-adjust: exact; }
-              }
             </style>
           </head>
           <body>
             <div class="header">
-              <div>
-                <h1>FinControl</h1>
-                <p>Extrato Financeiro Completo</p>
-              </div>
-              <div style="text-align: right">
-                <p>Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p>
-              </div>
+              <div><h1>FinControl</h1><p>Extrato Financeiro Completo</p></div>
+              <div style="text-align: right"><p>Gerado em ${new Date().toLocaleDateString('pt-BR')} às ${new Date().toLocaleTimeString('pt-BR')}</p></div>
             </div>
-
             <div class="summary">
-              <div class="card">
-                <h3>Saldo Total</h3>
-                <p>R$ ${balance.total.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
-              </div>
-              <div class="card">
-                <h3>Receitas</h3>
-                <p style="color: #16a34a">R$ ${balance.income.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
-              </div>
-              <div class="card">
-                <h3>Despesas</h3>
-                <p style="color: #dc2626">R$ ${balance.expense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p>
-              </div>
+              <div class="card"><h3>Saldo Total</h3><p>R$ ${balance.total.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p></div>
+              <div class="card"><h3>Receitas</h3><p style="color: #16a34a">R$ ${balance.income.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p></div>
+              <div class="card"><h3>Despesas</h3><p style="color: #dc2626">R$ ${balance.expense.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</p></div>
             </div>
-
             <table>
-              <thead>
-                <tr>
-                  <th width="15%">Data</th>
-                  <th width="35%">Descrição</th>
-                  <th width="20%">Categoria</th>
-                  <th width="15%">Conta / Método</th>
-                  <th width="15%" class="text-right">Valor</th>
-                </tr>
-              </thead>
+              <thead><tr><th width="15%">Data</th><th width="35%">Descrição</th><th width="20%">Categoria</th><th width="15%">Conta / Método</th><th width="15%" class="text-right">Valor</th></tr></thead>
               <tbody>
                 ${richData.map(t => `
                   <tr>
                     <td>${t.dateFormatted}</td>
-                    <td>
-                        <div style="font-weight: 600; color: #0f172a;">${t.title}</div>
-                    </td>
-                    <td>
-                        <div class="badge">${t.categoryName}</div>
-                    </td>
-                    <td>
-                        <div style="color: #334155;">${t.walletName}</div>
-                        <div class="meta">${t.methodName}</div>
-                    </td>
-                    <td class="text-right ${t.type === 'Receita' ? 'income' : 'expense'}">
-                      ${t.type === 'Despesa' ? '-' : '+'} R$ ${t.amount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}
-                    </td>
+                    <td><div style="font-weight: 600; color: #0f172a;">${t.title}</div></td>
+                    <td><div class="badge">${t.categoryName}</div></td>
+                    <td><div style="color: #334155;">${t.walletName}</div><div class="meta">${t.methodName}</div></td>
+                    <td class="text-right ${t.type === 'Receita' ? 'income' : 'expense'}">${t.type === 'Despesa' ? '-' : '+'} R$ ${t.amount.toLocaleString('pt-BR', {minimumFractionDigits: 2})}</td>
                   </tr>
                 `).join('')}
               </tbody>
             </table>
-            
-            <div style="margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 10px; text-align: center; color: #94a3b8; font-size: 10px;">
-                Fim do relatório • FinControl App
-            </div>
-
-            <script>
-              window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 500); }
-            </script>
+            <script>window.onload = function() { setTimeout(() => { window.print(); window.close(); }, 500); }</script>
           </body>
         </html>
       `);
@@ -213,12 +182,49 @@ export const DataScreen: React.FC = () => {
     reader.readAsText(file);
   };
 
+  // --- GOOGLE DRIVE LOGIC ---
+  const handleConnectDrive = () => {
+      if (!isPro) {
+          if(confirm('Backup automático no Google Drive é exclusivo para planos Pro e Ultra. Deseja assinar?')) {
+              navigate('/profile/plan');
+          }
+          return;
+      }
+      googleDriveService.requestToken();
+  };
+
+  const handleDisconnectDrive = () => {
+      googleDriveService.logout();
+      setIsAutoBackupEnabled(false);
+      localStorage.removeItem('fincontrol_auto_backup');
+  };
+
+  const handleManualDriveBackup = async () => {
+      setDriveLoading(true);
+      const json = await db.createFullBackup();
+      const filename = `FinControl_Backup_${new Date().toISOString().split('T')[0]}.json`;
+      const result = await googleDriveService.uploadFile(json, filename);
+      
+      if (result.success) {
+          setStatus({ type: 'success', msg: result.message || 'Backup enviado!' });
+      } else {
+          setStatus({ type: 'error', msg: result.message || 'Falha no envio.' });
+          // Se falhou por token, desconecta
+          if (result.message?.includes('Token')) handleDisconnectDrive();
+      }
+      setDriveLoading(false);
+  };
+
+  const toggleAutoBackup = (enabled: boolean) => {
+      setIsAutoBackupEnabled(enabled);
+      localStorage.setItem('fincontrol_auto_backup', enabled ? 'true' : 'false');
+  };
+
   const isPro = profile?.plan === 'pro' || profile?.plan === 'ultra';
 
   return (
     <div className="bg-background-light dark:bg-background-dark min-h-screen flex flex-col font-display relative">
        <header className="flex items-center p-4">
-        {/* FIX: Usar rota explícita para evitar problema de histórico preso após redirecionamento */}
         <button onClick={() => navigate('/profile')} className="p-2"><span className="material-symbols-outlined dark:text-white">arrow_back</span></button>
         <h1 className="text-lg font-bold dark:text-white ml-2">Dados e Backup</h1>
       </header>
@@ -271,8 +277,8 @@ export const DataScreen: React.FC = () => {
              <div className="flex items-center gap-3">
                <span className="material-symbols-outlined text-blue-500">save</span>
                <div className="text-left">
-                 <p className="font-bold dark:text-white text-sm">Fazer Backup</p>
-                 <p className="text-xs text-slate-400">Salvar arquivo .JSON</p>
+                 <p className="font-bold dark:text-white text-sm">Fazer Backup Local</p>
+                 <p className="text-xs text-slate-400">Salvar arquivo .JSON no dispositivo</p>
                </div>
              </div>
              <span className="material-symbols-outlined text-blue-500">download</span>
@@ -296,6 +302,55 @@ export const DataScreen: React.FC = () => {
               )}
             </div>
           </div>
+        </div>
+
+        {/* --- GOOGLE DRIVE SECTION --- */}
+        <div className={`p-4 rounded-xl border transition-all ${isPro ? 'bg-white dark:bg-[#192233] border-slate-100 dark:border-transparent' : 'bg-slate-100 dark:bg-[#111620] border-dashed border-slate-300 dark:border-slate-800 opacity-80'}`}>
+            <div className="flex items-center gap-3 mb-4">
+                <img src="https://upload.wikimedia.org/wikipedia/commons/d/da/Google_Drive_logo_%282020%29.svg" alt="Google Drive" className="w-8 h-8" />
+                <div className="flex-1">
+                    <h3 className="font-bold dark:text-white text-sm">Backup no Google Drive</h3>
+                    <p className="text-xs text-slate-500">{isPro ? 'Sincronização na nuvem' : 'Exclusivo Pro/Ultra'}</p>
+                </div>
+                {!isPro && <span className="material-symbols-outlined text-slate-400">lock</span>}
+            </div>
+
+            {isPro && (
+                <div className="space-y-3">
+                    {!isDriveConnected ? (
+                        <button onClick={handleConnectDrive} className="w-full py-3 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg font-bold text-slate-700 dark:text-white flex items-center justify-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-700/80 transition-colors">
+                            <span className="material-symbols-outlined">add_link</span>
+                            Conectar Conta Google
+                        </button>
+                    ) : (
+                        <div className="bg-green-50 dark:bg-green-900/10 p-3 rounded-lg border border-green-100 dark:border-green-900/30">
+                            <div className="flex justify-between items-center mb-3">
+                                <span className="text-xs font-bold text-green-700 dark:text-green-400 flex items-center gap-1">
+                                    <span className="material-symbols-outlined text-[14px]">check_circle</span> Conectado
+                                </span>
+                                <button onClick={handleDisconnectDrive} className="text-xs text-red-500 hover:underline">Desconectar</button>
+                            </div>
+                            
+                            <div className="flex items-center justify-between mb-3 bg-white dark:bg-slate-800 p-2 rounded-md shadow-sm">
+                                <span className="text-sm font-medium dark:text-white">Backup Automático</span>
+                                <SwitchItem checked={isAutoBackupEnabled} onChange={toggleAutoBackup} />
+                            </div>
+
+                            <button 
+                                onClick={handleManualDriveBackup} 
+                                disabled={driveLoading}
+                                className="w-full py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-bold rounded-md flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+                            >
+                                {driveLoading ? <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin"></div> : <span className="material-symbols-outlined text-[14px]">cloud_upload</span>}
+                                Fazer Backup Agora
+                            </button>
+                        </div>
+                    )}
+                    <p className="text-[10px] text-slate-400 text-center">
+                        Os arquivos são salvos na sua conta Google.
+                    </p>
+                </div>
+            )}
         </div>
 
       </main>
