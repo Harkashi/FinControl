@@ -1,5 +1,4 @@
 
-
 import { createClient, SupabaseClient, User as SupabaseUser } from '@supabase/supabase-js';
 import { Transaction, Category, User, UserProfile, NotificationSettings, SmartRule, UserStats, Wallet, PaymentMethod, BudgetReport, FinancialGoal, DashboardMetrics, AutomationSettings, FinancialScore, SmartAlert, ComparisonData, BehaviorAnalysis } from '../types';
 
@@ -395,6 +394,7 @@ class DatabaseService {
     if (!this.currentUser) return { success: false };
     
     let categoryId = tx.categoryId;
+    // 1. Smart Rules Logic
     if (!categoryId) {
        try {
            const { data: rules } = await this.supabase.from('smart_category_rules').select('*').eq('user_id', this.currentUser.id);
@@ -405,12 +405,42 @@ class DatabaseService {
        } catch (e) {}
     }
 
-    const installments = tx.installments || 1;
+    // 2. FETCH CATEGORY STYLES (Fix for the generic icon issue)
+    let finalIcon = tx.icon || 'payments';
+    let finalColor = 'text-gray-600';
+    let finalBg = 'bg-gray-100';
+
+    if (categoryId) {
+        // Try to find category details to apply correct branding
+        const { data: cat } = await this.supabase
+            .from('categories')
+            .select('icon, color_class, bg_class')
+            .eq('id', categoryId)
+            .single();
+        
+        if (cat) {
+            // Only use category icon if a specific custom icon (like for car installment) wasn't passed
+            if (!tx.icon) finalIcon = cat.icon;
+            finalColor = cat.color_class;
+            finalBg = cat.bg_class;
+        }
+    }
+
+    // 3. Installment Logic
+    let installments = tx.installments || 1;
+    // Special handling for Fixed Costs: Generate 12 occurrences if set to 1, to simulate recurrence
+    if (tx.isFixed && installments === 1) {
+        installments = 12;
+    }
+
     const payloads = [];
     const groupId = installments > 1 ? uuidv4() : null;
     let baseAmount = tx.amount;
     // Se não for financiamento (que tem valor total fixo no amount), divide o valor total pelas parcelas
-    if (installments > 1 && !tx.financingDetails) baseAmount = tx.amount / installments;
+    // Only divide if it's NOT fixed cost (fixed costs have same amount each month) AND NOT financing
+    if (installments > 1 && !tx.financingDetails && !tx.isFixed) {
+        baseAmount = tx.amount / installments;
+    }
 
     let sub = tx.subtitle;
     if (tx.financingDetails) sub += `${SEPARATOR}${JSON.stringify(tx.financingDetails)}`;
@@ -419,13 +449,29 @@ class DatabaseService {
         const d = new Date(tx.date);
         d.setMonth(d.getMonth() + i);
         const isoDate = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        
+        // For fixed costs, installment info is null/irrelevant for user display, but kept internal
+        const instNum = (installments > 1 && !tx.isFixed) ? i + 1 : null;
+        const instTotal = (installments > 1 && !tx.isFixed) ? installments : null;
+
         payloads.push({
-            user_id: this.currentUser.id, title: tx.title, subtitle: sub, 
-            amount: baseAmount, type: tx.type, date: isoDate, category_id: categoryId,
-            wallet_id: tx.walletId, payment_method_id: tx.paymentMethodId,
-            icon: tx.icon || 'payments', color_class: 'text-gray-600', bg_class: 'bg-gray-100',
-            installment_number: installments > 1 ? i + 1 : null, installment_total: installments > 1 ? installments : null,
-            installment_group_id: groupId, is_fixed: tx.isFixed
+            user_id: this.currentUser.id, 
+            title: tx.title, 
+            subtitle: sub, 
+            amount: baseAmount, 
+            type: tx.type, 
+            date: isoDate, 
+            category_id: categoryId,
+            wallet_id: tx.walletId, 
+            payment_method_id: tx.paymentMethodId,
+            // Use the fetched styles
+            icon: finalIcon, 
+            color_class: finalColor, 
+            bg_class: finalBg,
+            installment_number: instNum, 
+            installment_total: instTotal,
+            installment_group_id: groupId, 
+            is_fixed: tx.isFixed
         });
     }
     const { error } = await this.supabase.from('transactions').insert(payloads);
@@ -578,18 +624,85 @@ class DatabaseService {
   }
 
   async getBudgetsReport(month: number, year: number): Promise<BudgetReport> {
+      // 1. Fetch Goals
+      const goals = await this.getGoals();
+
+      // 2. Fetch Transactions & Categories
       const txs = await this.getTransactions();
       const cats = await this.getCategories();
-      // Simplified calc
-      let totalSpent = 0, totalBudget = 0;
+
+      // 3. Filter Transactions for selected Month/Year
+      const monthlyTxs = txs.filter(t => {
+          // Use string parsing to be consistent with local strings
+          const [y, m, d] = t.date.split('-').map(Number);
+          return (m - 1) === month && y === year;
+      });
+
+      // 4. Calculate Totals
+      let totalSpent = 0;
+      let totalBudget = 0;
+      let fixedCosts = 0;
+      let committedInstallments = 0;
+      
       cats.forEach(c => { if(c.budget) totalBudget += c.budget; });
-      // Filter month
-      txs.forEach(t => { if(t.type === 'expense') totalSpent += t.amount; }); // Needs proper date filter in real usage
+
+      const fixedCostsList: Transaction[] = [];
+      const activeInstallmentsList: Transaction[] = [];
+
+      monthlyTxs.forEach(t => {
+          if(t.type === 'expense') {
+              totalSpent += t.amount;
+              
+              if (t.isFixed) {
+                  fixedCosts += t.amount;
+                  fixedCostsList.push(t);
+              } else if (t.installmentTotal && t.installmentTotal > 1) {
+                  committedInstallments += t.amount;
+                  activeInstallmentsList.push(t);
+              }
+          }
+      });
+
+      const variableSpent = totalSpent - fixedCosts - committedInstallments;
+      
+      // Calculate Percentages for Categories
+      const categoriesWithSpend = cats.map(c => {
+          const catSpent = monthlyTxs
+            .filter(t => t.categoryId === c.id && t.type === 'expense')
+            .reduce((sum, t) => sum + t.amount, 0);
+          return { ...c, spent: catSpent };
+      });
+
+      // Calculate Pace
+      const now = new Date();
+      const isCurrentMonth = now.getMonth() === month && now.getFullYear() === year;
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const daysPassed = isCurrentMonth ? now.getDate() : (now > new Date(year, month + 1, 0) ? daysInMonth : 0);
+      const daysPassedPct = (daysPassed / daysInMonth) * 100;
+      const budgetConsumedPct = totalBudget > 0 ? (totalSpent / totalBudget) * 100 : 0;
+      
+      let pace: 'slow' | 'on-track' | 'fast' | 'critical' = 'on-track';
+      if (totalBudget > 0) {
+          if (budgetConsumedPct > 100) pace = 'critical';
+          else if (budgetConsumedPct > daysPassedPct + 10) pace = 'fast'; 
+          else if (budgetConsumedPct < daysPassedPct - 10) pace = 'slow';
+      }
+
       return {
-          totalBudget, totalSpent, remaining: totalBudget - totalSpent,
-          fixedCosts: 0, committedInstallments: 0, variableSpent: 0,
-          activeInstallmentsList: [], fixedCostsList: [], pace: 'on-track', daysPassedPct: 0, budgetConsumedPct: 0,
-          categories: cats, alertCategory: null, goals: []
+          totalBudget, 
+          totalSpent, 
+          remaining: totalBudget - totalSpent,
+          fixedCosts, 
+          committedInstallments, 
+          variableSpent,
+          activeInstallmentsList, 
+          fixedCostsList, 
+          pace, 
+          daysPassedPct, 
+          budgetConsumedPct,
+          categories: categoriesWithSpend, 
+          alertCategory: null, 
+          goals // Fixed: returning goals
       };
   }
 
@@ -608,13 +721,128 @@ class DatabaseService {
       await this.supabase.from('profiles').update(data).eq('id', this.currentUser.id);
   }
   async updateUserName(name: string) { /* ... */ }
-  async getUserStats() { return { daysActive: 0, totalTransactions: 0, currentStreak: 0, maxStreak: 0 }; }
-  async getNotificationSettings() { return null; }
-  async updateNotificationSettings(s: any) {}
-  async logActivity() {}
-  async getSmartRules() { return []; }
-  async addSmartRule(k: string, c: string) {}
-  async deleteSmartRule(id: string) {}
+  
+  // REAL IMPLEMENTATION
+  async getUserStats(): Promise<UserStats> {
+    if (!this.currentUser) return { daysActive: 0, totalTransactions: 0, currentStreak: 0, maxStreak: 0 };
+    
+    try {
+        // Fetch dates only for performance
+        const { data } = await this.supabase
+          .from('transactions')
+          .select('date')
+          .eq('user_id', this.currentUser.id)
+          .order('date', { ascending: false });
+
+        if (!data || data.length === 0) {
+            return { daysActive: 0, totalTransactions: 0, currentStreak: 0, maxStreak: 0 };
+        }
+
+        const totalTransactions = data.length;
+        
+        // Fix: Ensure we take only YYYY-MM-DD part if Supabase returns full ISO string
+        // Also cast to any to avoid TS issues with partial select
+        const uniqueDates = Array.from(new Set(data.map((t: any) => String(t.date).substring(0, 10)))).sort((a: string, b: string) => b.localeCompare(a));
+        const daysActive = uniqueDates.length;
+
+        // Calculate Streaks
+        const today = new Date();
+        today.setHours(0,0,0,0);
+        
+        const datesAsTime = uniqueDates.map((d: string) => {
+            // Parse YYYY-MM-DD safely
+            const [y, m, day] = d.split('-').map(Number);
+            return new Date(y, m-1, day).getTime();
+        });
+
+        let currentStreak = 0;
+        let maxStreak = 0;
+        let tempStreak = 0;
+
+        // Calculate Max Streak
+        if (datesAsTime.length > 0) {
+            tempStreak = 1;
+            maxStreak = 1;
+            for (let i = 0; i < datesAsTime.length - 1; i++) {
+                const diffTime = datesAsTime[i] - datesAsTime[i+1];
+                const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+                
+                if (diffDays === 1) {
+                    tempStreak++;
+                } else {
+                    maxStreak = Math.max(maxStreak, tempStreak);
+                    tempStreak = 1;
+                }
+            }
+            maxStreak = Math.max(maxStreak, tempStreak);
+        }
+
+        // Calculate Current Streak
+        if (datesAsTime.length > 0) {
+            const lastActivity = datesAsTime[0];
+            const diffFromToday = Math.round((today.getTime() - lastActivity) / (1000 * 3600 * 24));
+            
+            // Streak is active if last transaction was today (0) or yesterday (1)
+            if (diffFromToday <= 1) {
+                currentStreak = 1;
+                for (let i = 0; i < datesAsTime.length - 1; i++) {
+                    const diffTime = datesAsTime[i] - datesAsTime[i+1];
+                    const diffDays = Math.round(diffTime / (1000 * 3600 * 24));
+                    if (diffDays === 1) {
+                        currentStreak++;
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        return { daysActive, totalTransactions, currentStreak, maxStreak };
+    } catch (e) {
+        console.error("Error calculating user stats", e);
+        return { daysActive: 0, totalTransactions: 0, currentStreak: 0, maxStreak: 0 };
+    }
+  }
+
+  // --- IMPLEMENTED FEATURES ---
+  async getNotificationSettings(): Promise<NotificationSettings | null> {
+      if (!this.currentUser) return null;
+      const { data } = await this.supabase.from('notification_settings').select('*').eq('user_id', this.currentUser.id).single();
+      return data;
+  }
+
+  async updateNotificationSettings(settings: Partial<NotificationSettings>): Promise<void> {
+      if (!this.currentUser) return;
+      await this.supabase.from('notification_settings').update(settings).eq('user_id', this.currentUser.id);
+  }
+
+  async logActivity() {} // Still stub for analytics
+
+  async getSmartRules(): Promise<SmartRule[]> {
+    if (!this.currentUser) return [];
+    try {
+        const { data } = await this.supabase.from('smart_category_rules').select('*').eq('user_id', this.currentUser.id);
+        return data || [];
+    } catch (e) {
+        return [];
+    }
+  }
+
+  async addSmartRule(keyword: string, categoryId: string): Promise<boolean> {
+    if (!this.currentUser) return false;
+    const { error } = await this.supabase.from('smart_category_rules').insert({
+        user_id: this.currentUser.id,
+        keyword,
+        category_id: categoryId
+    });
+    return !error;
+  }
+
+  async deleteSmartRule(id: string): Promise<boolean> {
+    if (!this.currentUser) return false;
+    const { error } = await this.supabase.from('smart_category_rules').delete().eq('id', id);
+    return !error;
+  }
   
   // FIXED RETURN TYPES
   async clearTransactions(): Promise<{ success: boolean; error?: any }> {

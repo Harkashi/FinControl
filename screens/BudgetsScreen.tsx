@@ -293,23 +293,40 @@ const BudgetsScreen: React.FC = () => {
                 <div className="absolute top-0 right-0 w-64 h-64 bg-primary/20 blur-[80px] rounded-full -mr-16 -mt-16 pointer-events-none"></div>
                 
                 <div className="relative z-10 flex flex-col gap-4">
-                    <div className="flex justify-between items-start">
+                    {/* Condição para Orçamento Zerado vs Normal */}
+                    {report?.totalBudget === 0 ? (
                         <div>
-                            <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">SALDO LIVRE REAL</p>
-                            <h1 className="text-4xl font-extrabold tracking-tight">{formatCurrency(report?.remaining || 0)}</h1>
+                            <div className="flex justify-between items-start mb-2">
+                                <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">GASTO TOTAL</p>
+                                <span className="bg-slate-800 text-slate-300 text-[10px] font-bold px-3 py-1 rounded-full border border-slate-700">SEM LIMITE</span>
+                            </div>
+                            <h1 className="text-4xl font-extrabold tracking-tight">{formatCurrency(report?.totalSpent || 0)}</h1>
+                            <p className="text-xs text-orange-400 mt-3 flex items-center gap-1">
+                                <span className="material-symbols-outlined text-[14px]">info</span>
+                                Defina orçamentos para ver seu saldo livre.
+                            </p>
                         </div>
-                        {report && <PaceIndicator pace={report.pace} />}
-                    </div>
+                    ) : (
+                        <>
+                            <div className="flex justify-between items-start">
+                                <div>
+                                    <p className="text-slate-400 text-[10px] font-bold uppercase tracking-widest mb-2">SALDO LIVRE REAL</p>
+                                    <h1 className="text-4xl font-extrabold tracking-tight">{formatCurrency(report?.remaining || 0)}</h1>
+                                </div>
+                                {report && <PaceIndicator pace={report.pace} />}
+                            </div>
 
-                    {/* Progress Bar */}
-                    <div className="relative h-4 bg-white/10 rounded-full mt-2 w-full">
-                        <div className="absolute h-full bg-primary rounded-full transition-all duration-1000" style={{ width: `${Math.min(100, report?.budgetConsumedPct || 0)}%` }}></div>
-                        <div className="absolute top-0 bottom-0 w-0.5 bg-white z-10 opacity-70" style={{ left: `${report?.daysPassedPct}%` }} title="Hoje"></div>
-                    </div>
-                    <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        <span>Gasto: {formatCurrency(report?.totalSpent || 0)}</span>
-                        <span>Limite: {formatCurrency(report?.totalBudget || 0)}</span>
-                    </div>
+                            {/* Progress Bar */}
+                            <div className="relative h-4 bg-white/10 rounded-full mt-2 w-full">
+                                <div className="absolute h-full bg-primary rounded-full transition-all duration-1000" style={{ width: `${Math.min(100, report?.budgetConsumedPct || 0)}%` }}></div>
+                                <div className="absolute top-0 bottom-0 w-0.5 bg-white z-10 opacity-70" style={{ left: `${report?.daysPassedPct}%` }} title="Hoje"></div>
+                            </div>
+                            <div className="flex justify-between text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                                <span>Gasto: {formatCurrency(report?.totalSpent || 0)}</span>
+                                <span>Limite: {formatCurrency(report?.totalBudget || 0)}</span>
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
 

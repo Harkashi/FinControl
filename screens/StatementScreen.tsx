@@ -1,13 +1,34 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AreaChart, Area, ResponsiveContainer, Tooltip } from 'recharts';
+import { AreaChart, Area, ResponsiveContainer, Tooltip, YAxis, CartesianGrid, BarChart, Bar, XAxis } from 'recharts';
 import BottomNav from '../components/BottomNav';
 import { db } from '../services/database';
 import { Transaction, Category, Wallet, PaymentMethod } from '../types';
 import { useTheme } from '../components/ThemeHandler';
 
 type FilterType = 'all' | 'month' | 'income' | 'expense' | 'future';
+type ChartType = 'balance' | 'flow';
+
+// Custom Tooltip Component for better visuals
+const CustomChartTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="bg-[#1e293b]/95 backdrop-blur-md border border-slate-700/50 p-3 rounded-xl shadow-2xl animate-[fade-in_0.2s] min-w-[120px]">
+        <p className="text-slate-400 text-[10px] font-bold uppercase mb-2 tracking-wider border-b border-slate-700/50 pb-1">{label}</p>
+        {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex items-center justify-between gap-3 mb-1 last:mb-0">
+                <span className="text-[10px] font-bold text-slate-300 capitalize">{entry.name === 'amount' ? 'Saldo' : entry.name === 'income' ? 'Entrada' : 'Saída'}</span>
+                <span className="text-white font-bold text-xs" style={{ color: entry.color }}>
+                    {entry.name === 'expense' ? '- ' : ''}R$ {Math.abs(entry.value).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                </span>
+            </div>
+        ))}
+      </div>
+    );
+  }
+  return null;
+};
 
 const StatementScreen: React.FC = () => {
   const navigate = useNavigate();
@@ -30,6 +51,7 @@ const StatementScreen: React.FC = () => {
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeFilter, setActiveFilter] = useState<FilterType>('all'); 
+  const [chartType, setChartType] = useState<ChartType>('balance');
 
   useEffect(() => {
     const loadData = async () => {
@@ -64,7 +86,12 @@ const StatementScreen: React.FC = () => {
 
   const applyFilters = (txs: Transaction[], filter: FilterType) => {
     const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+    // Helper to get local date string YYYY-MM-DD safely
+    const getSafeDateStr = (dateObj: Date) => {
+        return `${dateObj.getFullYear()}-${String(dateObj.getMonth()+1).padStart(2,'0')}-${String(dateObj.getDate()).padStart(2,'0')}`;
+    };
+    
+    const todayStr = getSafeDateStr(now);
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
 
@@ -97,30 +124,36 @@ const StatementScreen: React.FC = () => {
 
     setFilteredTransactions(filtered);
 
-    // Calculate Balance
+    // Calculate Balance (Only up to today)
     const historyTxs = txs.filter(t => t.date <= todayStr);
     const totalBalance = historyTxs.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
     setBalance(totalBalance);
 
-    // Generate Chart Data (Last 30 days balance history)
+    // Generate Chart Data (Last 30 days)
     const days = 30;
     const chartPoints = [];
     let runningBalance = totalBalance;
     
-    // Reverse logic: start from today (totalBalance) and subtract today's changes to find yesterday's balance
+    // Reverse logic for Balance reconstruction
     for (let i = 0; i < days; i++) {
         const d = new Date();
         d.setDate(d.getDate() - i);
-        const dateStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+        const dateStr = getSafeDateStr(d);
         
+        // Find changes for this specific date
+        const dayTxs = historyTxs.filter(t => t.date.startsWith(dateStr));
+        const dayIncome = dayTxs.filter(t => t.type === 'income').reduce((acc, t) => acc + t.amount, 0);
+        const dayExpense = dayTxs.filter(t => t.type === 'expense').reduce((acc, t) => acc + t.amount, 0);
+        const dayChange = dayIncome - dayExpense;
+
         chartPoints.unshift({
             date: `${d.getDate()}/${d.getMonth()+1}`,
-            amount: runningBalance
+            fullDate: dateStr,
+            amount: runningBalance,
+            income: dayIncome,
+            expense: dayExpense
         });
 
-        // Find changes that happened on this specific date
-        const dayTxs = historyTxs.filter(t => t.date === dateStr);
-        const dayChange = dayTxs.reduce((acc, t) => acc + (t.type === 'income' ? t.amount : -t.amount), 0);
         runningBalance -= dayChange;
     }
     setChartData(chartPoints);
@@ -132,7 +165,9 @@ const StatementScreen: React.FC = () => {
   };
 
   const formatDate = (dateStr: string) => {
+      if (!dateStr) return '';
       const parts = dateStr.split('-');
+      if (parts.length < 3) return dateStr;
       return `${parts[2]}/${parts[1]}/${parts[0]}`;
   };
 
@@ -274,28 +309,72 @@ const StatementScreen: React.FC = () => {
 
       {/* Balance Card & Chart */}
       <div className="px-4 mb-6">
-         <div className="bg-[#192233] rounded-2xl p-6 shadow-xl shadow-slate-900/10 text-white relative overflow-hidden">
+         <div className="bg-[#192233] rounded-2xl p-6 shadow-xl shadow-slate-900/10 text-white relative overflow-hidden ring-1 ring-white/5">
             <div className="relative z-10">
-                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Saldo Atual</p>
-                <h2 className="text-3xl font-extrabold mb-4">{formatCurrency(balance)}</h2>
+                <div className="flex justify-between items-start mb-4">
+                    <div>
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Saldo Atual</p>
+                        <h2 className="text-3xl font-extrabold">{formatCurrency(balance)}</h2>
+                    </div>
+                    {/* Toggle Button */}
+                    <div className="flex bg-[#232f48] p-1 rounded-lg">
+                        <button 
+                            onClick={() => setChartType('balance')} 
+                            className={`p-1.5 rounded-md transition-colors ${chartType === 'balance' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                            title="Ver Saldo"
+                        >
+                            <span className="material-symbols-outlined text-[18px]">show_chart</span>
+                        </button>
+                        <button 
+                            onClick={() => setChartType('flow')} 
+                            className={`p-1.5 rounded-md transition-colors ${chartType === 'flow' ? 'bg-primary text-white shadow-sm' : 'text-slate-400 hover:text-white'}`}
+                            title="Ver Entradas vs Saídas"
+                        >
+                            <span className="material-symbols-outlined text-[18px]">bar_chart</span>
+                        </button>
+                    </div>
+                </div>
                 
-                <div className="h-32 w-full -ml-2">
+                {/* Chart Area */}
+                <div className="h-40 w-full -ml-2">
                     <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={chartData}>
-                            <defs>
-                                <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
-                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
-                                </linearGradient>
-                            </defs>
-                            <Tooltip 
-                                contentStyle={{backgroundColor: '#1e293b', border: 'none', borderRadius: '8px', color: '#fff'}}
-                                itemStyle={{color: '#fff'}}
-                                labelStyle={{display: 'none'}}
-                                formatter={(value: number) => [`R$ ${value.toFixed(2)}`, 'Saldo']}
-                            />
-                            <Area type="monotone" dataKey="amount" stroke="#3b82f6" strokeWidth={2} fillOpacity={1} fill="url(#colorBalance)" />
-                        </AreaChart>
+                        {chartType === 'balance' ? (
+                            <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                <defs>
+                                    <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.4}/>
+                                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                                    </linearGradient>
+                                </defs>
+                                <CartesianGrid vertical={false} stroke="#ffffff10" strokeDasharray="3 3" />
+                                {/* Dynamic Y-Axis Domain to show variations clearly */}
+                                <YAxis domain={['dataMin - 100', 'auto']} hide />
+                                <Tooltip 
+                                    content={<CustomChartTooltip />}
+                                    cursor={{ stroke: '#ffffff30', strokeWidth: 1 }}
+                                />
+                                <Area 
+                                    type="monotone" 
+                                    dataKey="amount" 
+                                    stroke="#3b82f6" 
+                                    strokeWidth={3} 
+                                    fillOpacity={1} 
+                                    fill="url(#colorBalance)" 
+                                    animationDuration={800}
+                                />
+                            </AreaChart>
+                        ) : (
+                            <BarChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                                <CartesianGrid vertical={false} stroke="#ffffff10" strokeDasharray="3 3" />
+                                <YAxis hide />
+                                <Tooltip 
+                                    content={<CustomChartTooltip />}
+                                    cursor={{ fill: '#ffffff10' }}
+                                />
+                                <Bar dataKey="income" name="income" fill="#10b981" radius={[4, 4, 0, 0]} maxBarSize={12} stackId="a" />
+                                <Bar dataKey="expense" name="expense" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={12} stackId="b" />
+                            </BarChart>
+                        )}
                     </ResponsiveContainer>
                 </div>
             </div>
@@ -346,22 +425,23 @@ const StatementScreen: React.FC = () => {
                  return (
                      <React.Fragment key={t.id}>
                         {showDateHeader && (
-                            <div className="text-xs font-bold text-slate-400 mt-2 mb-1 uppercase tracking-wider sticky top-[72px] bg-background-light/95 dark:bg-background-dark/95 backdrop-blur-sm py-2 z-10">
+                            <div className="text-xs font-bold text-slate-400 mt-2 mb-1 uppercase tracking-wider sticky top-[72px] bg-background-light/95 dark:bg-background-dark/95 backdrop-blur-sm py-2 z-10 flex items-center gap-2">
                                 {formatDate(t.date)}
+                                <div className="h-px bg-slate-200 dark:bg-slate-800 flex-1"></div>
                             </div>
                         )}
                         <div 
                            onClick={() => navigate('/add', { state: { ...t, isEditing: true } })}
-                           className="flex items-center justify-between p-4 bg-white dark:bg-[#192233] rounded-xl border border-slate-100 dark:border-slate-800/50 shadow-sm active:scale-[0.99] transition-transform"
+                           className="flex items-center justify-between p-4 bg-white dark:bg-[#192233] rounded-xl border border-slate-100 dark:border-slate-800/50 shadow-sm active:scale-[0.99] transition-transform group hover:border-primary/20"
                         >
                             <div className="flex items-center gap-3 overflow-hidden">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${t.bgClass} ${t.colorClass}`}>
+                                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${t.bgClass} ${t.colorClass} group-hover:scale-110 transition-transform`}>
                                     <span className="material-symbols-outlined text-[20px]">{t.icon}</span>
                                 </div>
                                 <div className="min-w-0">
                                     <p className="font-bold text-slate-900 dark:text-white text-sm truncate">{t.title}</p>
                                     <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                                        <span>{walletName}</span>
+                                        <span className="max-w-[100px] truncate">{walletName}</span>
                                         {t.installmentNumber && (
                                             <span className="bg-slate-100 dark:bg-slate-700 px-1.5 rounded text-[10px] font-bold">
                                                 {t.installmentNumber}/{t.installmentTotal}
