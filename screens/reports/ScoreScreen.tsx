@@ -122,10 +122,11 @@ const ScoreScreen: React.FC = () => {
                              innerRadius={80}
                              outerRadius={110}
                              paddingAngle={0}
+                             cornerRadius={10}
                              dataKey="value"
                              stroke="none"
                          >
-                             <Cell key="score" fill={scoreColor} cornerRadius={10} />
+                             <Cell key="score" fill={scoreColor} />
                              <Cell key="rest" fill={document.documentElement.classList.contains('dark') ? '#334155' : '#e2e8f0'} />
                          </Pie>
                      </PieChart>
