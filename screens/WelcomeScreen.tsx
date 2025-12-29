@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const WALLET_IMAGE = "https://lh3.googleusercontent.com/aida-public/AB6AXuDpyjDohqE781rx296GnCf4TLM7Fykc1sTuNqpFddrz-P8BjILQIgC0SYLvXElForX6ee4dTxq42mPKyIqBjWSkRPWlltc6Ub7wE0zLyxbd8IsMMYtAc9lTt8YbA-uFYSltoxRuGCU5-YVwUDhLxUC2-9_JMIV-Wlcytmj5jLu3kHNZ44WMHeR_58D55Klhyd9SpT5yuDhoSJDIqiQPbZ-ld6UnRz468f07K52MZRLTLfSMAGcW2Kr2puE-oRDL1nGxkYTz9BYPdW3K";
+const WALLET_IMAGE = "https://raw.githubusercontent.com/Tarikul-Islam-Anik/Animated-Fluent-Emojis/master/Emojis/Objects/Purse.png";
 
 const SLIDES = [
   {

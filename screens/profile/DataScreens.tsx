@@ -307,7 +307,7 @@ export const DataScreen: React.FC = () => {
         {/* --- GOOGLE DRIVE SECTION --- */}
         <div className={`p-4 rounded-xl border transition-all ${isPro ? 'bg-white dark:bg-[#192233] border-slate-100 dark:border-transparent' : 'bg-slate-100 dark:bg-[#111620] border-dashed border-slate-300 dark:border-slate-800 opacity-80'}`}>
             <div className="flex items-center gap-3 mb-4">
-                <img src="https://upload.wikimedia.org/wikipedia/commons/d/da/Google_Drive_logo_%282020%29.svg" alt="Google Drive" className="w-8 h-8" />
+                <img src="https://ssl.gstatic.com/images/branding/product/1x/drive_2020q4_48dp.png" alt="Google Drive" className="w-8 h-8" />
                 <div className="flex-1">
                     <h3 className="font-bold dark:text-white text-sm">Backup no Google Drive</h3>
                     <p className="text-xs text-slate-500">{isPro ? 'Sincronização na nuvem' : 'Exclusivo Pro/Ultra'}</p>

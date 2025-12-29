@@ -15,6 +15,10 @@ export const googleDriveService = {
         client_id: CLIENT_ID,
         scope: SCOPES,
         callback: (response: any) => {
+          if (response.error) {
+            console.error("Google Auth Error:", response);
+            return;
+          }
           if (response.access_token) {
             this.setToken(response.access_token, response.expires_in);
           }
@@ -41,7 +45,8 @@ export const googleDriveService = {
   requestToken() {
     if (!this.tokenClient) this.init();
     if (this.tokenClient) {
-      this.tokenClient.requestAccessToken();
+      // Force prompt ensures the user sees the account picker, helpful for retries
+      this.tokenClient.requestAccessToken({ prompt: 'consent' });
     } else {
       console.error("Google Identity Services not loaded yet.");
       alert("Erro ao carregar serviços do Google. Verifique sua conexão.");

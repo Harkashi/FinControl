@@ -100,7 +100,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 // --- MAIN COMPONENT ---
 
-const DEFAULT_AVATAR = "https://lh3.googleusercontent.com/aida-public/AB6AXuCJhIxaEBwY2zopCT-KpzKsTCniMxM1KxHatRJvMvLiFu0uh99SZzVzXi2iSPt5ceck7s2RBB-nIiKmRnD0uljQGvYA6_0Qn7I3-mdIWmSVxnAbbfTLd4r1a7U4z9-za16-q93deEunS_ImVWVp3NfAmR_vTLIgsfazwv4Cx-OBLibnPFGR6dNkH5swn77HPuRLWx_1MPM8w1DEHtMsz1vjCsODbFWLZ23zrDHOtNfFXfceZjlqhupvMobuWH77BfcHQ2rFoeCkn0IH";
+const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/4140/4140048.png";
 
 const DashboardScreen: React.FC = () => {
   const navigate = useNavigate();

@@ -251,7 +251,7 @@ const LoginScreen: React.FC = () => {
 
         <div className="grid grid-cols-2 gap-4">
           <button type="button" className="flex h-12 items-center justify-center gap-2 rounded-xl border border-[#1e2a40] bg-[#151f32] hover:bg-[#1e2a40] active:scale-[0.98] transition-all">
-            <img src="https://lh3.googleusercontent.com/aida-public/AB6AXuBE27cB-Aww_vEQvoCXRt9tQPnsIA2mKTvVOy_LjONNXGMJVw4TcTOexRbOhtRVJrjOML0JTgFMAizYE25ifgOz-stvDDrr98GAS-XeJZy6wRznAGF_XbWiUVfUvEjrpYjMHKlA2yDX4aihzpNxUa3FQVPw8Ud3FcknqPTUU1kRQOqiyDxp0sw8mFapHVmKj8K3liIw1H-gp8iiP9D9PVQejZTgMZeZDShAvu1K7N6J_MFVUyq8eS5o3eRJwd-9iG_9VXDT8-FwfZ6M" alt="Google" className="w-5 h-5" />
+            <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5" />
             <span className="text-white text-sm font-bold">Google</span>
           </button>
           <button type="button" className="flex h-12 items-center justify-center gap-2 rounded-xl border border-[#1e2a40] bg-[#151f32] hover:bg-[#1e2a40] active:scale-[0.98] transition-all">
