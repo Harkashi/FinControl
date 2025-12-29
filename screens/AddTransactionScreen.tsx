@@ -15,6 +15,10 @@ interface TransactionDraft {
   destinationWalletId?: string;
   methodId?: string;
   createdCategoryId?: string;
+  isFixed?: boolean;
+  installments?: number;
+  // Allow loose typing for other props passed during edit
+  [key: string]: any;
 }
 
 const INSTALLMENT_TYPES = [
@@ -51,8 +55,8 @@ const AddTransactionScreen: React.FC = () => {
   const [date, setDate] = useState(() => state?.date || new Date().toISOString().split('T')[0]);
   
   // V2 Features State
-  const [installments, setInstallments] = useState(1);
-  const [isFixed, setIsFixed] = useState(false);
+  const [installments, setInstallments] = useState(() => state?.installments || 1);
+  const [isFixed, setIsFixed] = useState(() => state?.isFixed || false);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [installmentType, setInstallmentType] = useState('card');
   
@@ -73,6 +77,7 @@ const AddTransactionScreen: React.FC = () => {
   
   // Smart Rules State
   const [smartRules, setSmartRules] = useState<SmartRule[]>([]);
+  const [userPlan, setUserPlan] = useState<'free' | 'pro' | 'ultra'>('free');
   
   // UI
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -95,15 +100,22 @@ const AddTransactionScreen: React.FC = () => {
       }
       if (state?.type === 'transfer' && !description) setDescription('Transferência');
       
-      // Load Smart Rules ONLY if Premium
-      const checkPremiumAndLoadRules = async () => {
+      if (state?.isFixed || (state?.installments && state.installments > 1)) {
+          setShowAdvanced(true);
+      }
+
+      // Load User Profile & Smart Rules
+      const loadProfileData = async () => {
           const profile = await db.getUserProfile();
-          if (profile && (profile.plan === 'pro' || profile.plan === 'ultra')) {
-              const rules = await db.getSmartRules();
-              setSmartRules(rules);
+          if (profile) {
+              setUserPlan(profile.plan);
+              if (profile.plan === 'pro' || profile.plan === 'ultra') {
+                  const rules = await db.getSmartRules();
+                  setSmartRules(rules);
+              }
           }
       };
-      checkPremiumAndLoadRules();
+      loadProfileData();
   }, [wallets, methods, categories]);
 
   // Real-time Smart Categorization
@@ -396,12 +408,22 @@ const AddTransactionScreen: React.FC = () => {
                                 <span className="text-sm font-bold dark:text-white">Conta Fixa Mensal</span>
                                 <span className="text-[10px] text-slate-400">Repetir todo mês</span>
                             </div>
-                            <button 
-                                onClick={() => { setIsFixed(!isFixed); if(!isFixed) { setInstallments(1); setHasInterest(false); setIsSmartCalc(false); } }} 
-                                className={`w-11 h-6 rounded-full relative transition-colors ${isFixed ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}
-                            >
-                                <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${isFixed ? 'translate-x-5' : ''}`}></div>
-                            </button>
+                            <div className="flex items-center gap-2">
+                                {userPlan !== 'ultra' && <span className="material-symbols-outlined text-[16px] text-slate-400">lock</span>}
+                                <button 
+                                    onClick={() => { 
+                                        if (userPlan !== 'ultra') {
+                                            if(confirm('Recorrência automática é exclusiva do plano Ultra. Deseja conhecer?')) navigate('/profile/plan');
+                                            return;
+                                        }
+                                        setIsFixed(!isFixed); 
+                                        if(!isFixed) { setInstallments(1); setHasInterest(false); setIsSmartCalc(false); } 
+                                    }} 
+                                    className={`w-11 h-6 rounded-full relative transition-colors ${isFixed ? 'bg-primary' : 'bg-slate-200 dark:bg-slate-700'}`}
+                                >
+                                    <div className={`absolute top-1 left-1 w-4 h-4 bg-white rounded-full transition-transform ${isFixed ? 'translate-x-5' : ''}`}></div>
+                                </button>
+                            </div>
                         </div>
 
                         {!isFixed && (
@@ -413,13 +435,22 @@ const AddTransactionScreen: React.FC = () => {
                                             <button 
                                                 key={t.id} 
                                                 onClick={() => {
+                                                    if (t.id !== 'card' && userPlan !== 'ultra') {
+                                                        if(confirm('Calculadora Inteligente é exclusiva do plano Ultra. Deseja conhecer?')) navigate('/profile/plan');
+                                                        return;
+                                                    }
                                                     setInstallmentType(t.id);
                                                     if(t.id !== 'card') { setIsSmartCalc(true); setHasInterest(true); } else { setIsSmartCalc(false); setHasInterest(false); }
                                                 }}
-                                                className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border ${installmentType === t.id ? 'bg-primary text-white border-primary' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'}`}
+                                                className={`flex items-center gap-1 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-colors border relative overflow-hidden ${installmentType === t.id ? 'bg-primary text-white border-primary' : 'bg-slate-50 dark:bg-slate-800 text-slate-500 border-slate-200 dark:border-slate-700'}`}
                                             >
                                                 <span className="material-symbols-outlined text-[16px]">{t.icon}</span>
                                                 {t.label}
+                                                {t.id !== 'card' && userPlan !== 'ultra' && (
+                                                    <div className="absolute inset-0 bg-white/60 dark:bg-black/60 flex items-center justify-center">
+                                                        <span className="material-symbols-outlined text-[14px] text-slate-900 dark:text-white">lock</span>
+                                                    </div>
+                                                )}
                                             </button>
                                         ))}
                                     </div>

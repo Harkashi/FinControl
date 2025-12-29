@@ -184,3 +184,15 @@ export interface FinancialScore {
     value: string;
   }[];
 }
+
+export interface BehaviorAnalysis {
+  weekDayStats: { day: string; fullDay: string; amount: number; count: number; percent: number }[];
+  busiestDay: { day: string; amount: number };
+  averageTicket: number;
+  purchaseSize: {
+    small: { count: number; total: number; label: string };   // < R$ 50
+    medium: { count: number; total: number; label: string };  // R$ 50 - R$ 200
+    large: { count: number; total: number; label: string };   // > R$ 200
+  };
+  topMerchant: string;
+}

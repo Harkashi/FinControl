@@ -189,6 +189,7 @@ const DashboardScreen: React.FC = () => {
 
   const isMinimal = chartStyle === 'minimal';
   const isPremium = userPlan === 'pro' || userPlan === 'ultra';
+  const isUltra = userPlan === 'ultra';
 
   return (
     <div className="bg-background-light dark:bg-background-dark font-display text-white overflow-hidden h-screen flex flex-col selection:bg-primary/30">
@@ -238,9 +239,11 @@ const DashboardScreen: React.FC = () => {
             <div className="relative z-10">
               <div className="flex justify-between items-start mb-1">
                 <p className="text-blue-100 text-sm font-medium opacity-90">Saldo Total</p>
-                {/* Financial Health Indicator */}
+                {/* Financial Health Indicator - Clickable for Score */}
                 {!isLoading && metrics && (
-                  <div className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border border-white/20 ${
+                  <button 
+                    onClick={() => navigate('/reports/score')}
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide border border-white/20 active:scale-95 transition-transform ${
                       metrics.financialHealth === 'excellent' ? 'bg-green-400/20 text-green-100' : 
                       metrics.financialHealth === 'good' ? 'bg-blue-400/20 text-blue-100' :
                       metrics.financialHealth === 'stable' ? 'bg-yellow-400/20 text-yellow-100' : 'bg-red-400/20 text-red-100'
@@ -248,7 +251,7 @@ const DashboardScreen: React.FC = () => {
                     {metrics.financialHealth === 'excellent' ? 'Excelente' : 
                      metrics.financialHealth === 'good' ? 'Saudável' : 
                      metrics.financialHealth === 'stable' ? 'Estável' : 'Atenção'}
-                  </div>
+                  </button>
                 )}
               </div>
               
@@ -374,19 +377,35 @@ const DashboardScreen: React.FC = () => {
            <div className="flex justify-between items-end mb-4">
               <div>
                   <h3 className="text-white text-lg font-bold leading-tight tracking-[-0.015em]">Visão Geral</h3>
-                  {isPremium ? (
-                      <button onClick={() => navigate('/reports/comparison')} className="text-xs text-text-secondary mt-1 hover:text-white transition-colors flex items-center gap-1 group">
-                          {metrics?.monthVariationExpense! > 0 
-                            ? `Gastos subiram ${metrics?.monthVariationExpense?.toFixed(0)}% este mês` 
-                            : 'Você está gastando menos que mês passado!'}
-                          <span className="material-symbols-outlined text-[12px] opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
+                  <div className="flex items-center gap-3 mt-1">
+                      {isPremium ? (
+                          <button onClick={() => navigate('/reports/comparison')} className="text-xs text-text-secondary hover:text-white transition-colors flex items-center gap-1 group">
+                              Comparativo
+                              <span className="material-symbols-outlined text-[12px] opacity-0 group-hover:opacity-100 transition-opacity">arrow_forward</span>
+                          </button>
+                      ) : (
+                          <button onClick={() => navigate('/profile/plan')} className="flex items-center gap-1 text-xs text-yellow-500 font-bold hover:underline">
+                              <span className="material-symbols-outlined text-[12px]">lock</span>
+                              Comparativo
+                          </button>
+                      )}
+                      
+                      <div className="w-px h-3 bg-white/20"></div>
+
+                      <button onClick={() => navigate('/reports/behavior')} className={`flex items-center gap-1 text-xs font-bold ${isUltra ? 'text-green-400 hover:text-green-300' : 'text-slate-500'}`}>
+                          {!isUltra && <span className="material-symbols-outlined text-[12px]">lock</span>}
+                          Comportamento
+                          {isUltra && <span className="material-symbols-outlined text-[12px]">psychology</span>}
                       </button>
-                  ) : (
-                      <button onClick={() => navigate('/profile/plan')} className="flex items-center gap-1 text-xs text-yellow-500 mt-1 font-bold hover:underline">
-                          <span className="material-symbols-outlined text-[12px]">lock</span>
-                          Comparativo mensal indisponível
+
+                      <div className="w-px h-3 bg-white/20"></div>
+
+                      <button onClick={() => navigate('/reports/score')} className={`flex items-center gap-1 text-xs font-bold ${isUltra ? 'text-cyan-400 hover:text-cyan-300' : 'text-slate-500'}`}>
+                          {!isUltra && <span className="material-symbols-outlined text-[12px]">lock</span>}
+                          Score
+                          {isUltra && <span className="material-symbols-outlined text-[12px]">speed</span>}
                       </button>
-                  )}
+                  </div>
               </div>
               <button onClick={() => navigate('/statement')} className="text-primary text-xs font-bold bg-primary/10 px-3 py-1 rounded-full">Relatório</button>
            </div>

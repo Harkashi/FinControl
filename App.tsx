@@ -20,6 +20,8 @@ import WalletsScreen from './screens/WalletsScreen';
 import MethodsScreen from './screens/MethodsScreen';
 import ShortcutsScreen from './screens/ShortcutsScreen';
 import ComparisonScreen from './screens/reports/ComparisonScreen';
+import BehaviorScreen from './screens/reports/BehaviorScreen';
+import ScoreScreen from './screens/reports/ScoreScreen'; // Imported
 
 import { db } from './services/database';
 import { ThemeProvider } from './components/ThemeHandler';
@@ -85,6 +87,8 @@ const App: React.FC = () => {
                 <Route path="/wallets" element={<ProtectedRoute><WalletsScreen /></ProtectedRoute>} />
                 <Route path="/methods" element={<ProtectedRoute><MethodsScreen /></ProtectedRoute>} />
                 <Route path="/reports/comparison" element={<ProtectedRoute><ComparisonScreen /></ProtectedRoute>} />
+                <Route path="/reports/behavior" element={<ProtectedRoute><BehaviorScreen /></ProtectedRoute>} />
+                <Route path="/reports/score" element={<ProtectedRoute><ScoreScreen /></ProtectedRoute>} />
                 
                 {/* Profile & Settings Routes */}
                 <Route path="/profile" element={<ProtectedRoute><ProfileScreen /></ProtectedRoute>} />
