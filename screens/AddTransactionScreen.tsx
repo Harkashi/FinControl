@@ -2,7 +2,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useData } from '../contexts/DataContext';
-import { Category, Wallet, PaymentMethod } from '../types';
+import { db } from '../services/database';
+import { Category, Wallet, PaymentMethod, SmartRule } from '../types';
 
 interface TransactionDraft {
   type?: 'income' | 'expense' | 'transfer';
@@ -70,6 +71,9 @@ const AddTransactionScreen: React.FC = () => {
   const [destinationWalletId, setDestinationWalletId] = useState(() => state?.destinationWalletId || '');
   const [methodId, setMethodId] = useState(() => state?.methodId || '');
   
+  // Smart Rules State
+  const [smartRules, setSmartRules] = useState<SmartRule[]>([]);
+  
   // UI
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [saveError, setSaveError] = useState('');
@@ -90,7 +94,33 @@ const AddTransactionScreen: React.FC = () => {
          if (createdCat && createdCat.type !== 'both') setType(createdCat.type as any);
       }
       if (state?.type === 'transfer' && !description) setDescription('Transferência');
+      
+      // Load Smart Rules ONLY if Premium
+      const checkPremiumAndLoadRules = async () => {
+          const profile = await db.getUserProfile();
+          if (profile && (profile.plan === 'pro' || profile.plan === 'ultra')) {
+              const rules = await db.getSmartRules();
+              setSmartRules(rules);
+          }
+      };
+      checkPremiumAndLoadRules();
   }, [wallets, methods, categories]);
+
+  // Real-time Smart Categorization
+  useEffect(() => {
+      if (!description || smartRules.length === 0) return;
+      
+      const lowerDesc = description.toLowerCase();
+      // Find matching rule
+      const match = smartRules.find(r => lowerDesc.includes(r.keyword.toLowerCase()));
+      
+      if (match) {
+          // Update category if found and different
+          if (categoryId !== match.category_id) {
+              setCategoryId(match.category_id);
+          }
+      }
+  }, [description, smartRules]);
 
   // Effect para recalcular parcelas
   useEffect(() => {
